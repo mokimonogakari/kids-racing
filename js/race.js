@@ -144,7 +144,13 @@ export class Race {
       for (const it of s.items) {
         if (!it.taken && Math.abs(it.x - p.x) < magnet) {
           it.taken = true;
-          if (it.kind === 'star') this.stars++;
+          if (it.kind === 'star') {
+            this.stars++;
+            if (this.stars % 5 === 0) {
+              startBoost(p, 2.2);
+              this.emit('starReward', this.stars);
+            }
+          }
           else this.fruits[it.id] = (this.fruits[it.id] || 0) + 1;
           this.emit('collect', it.kind, it.id);
         }

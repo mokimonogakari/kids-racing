@@ -707,8 +707,9 @@ export class Renderer {
       const a = race.state === 'countdown' ? 0.85 : 0.85 * (1 - race.stateTime / 5);
       const wob = Math.sin(t * 5) * 8;
       c.globalAlpha = a;
-      this.arrow(this.safe.left + 56 + wob * -1, this.H * 0.72, -1);
-      this.arrow(this.W - this.safe.right - 56 + wob, this.H * 0.72, 1);
+      // Point at the actual bottom controls instead of obscuring the road.
+      this.arrow(this.safe.left + 56 + wob * -1, this.H - this.safe.bottom - 135, -1);
+      this.arrow(this.W - this.safe.right - 56 + wob, this.H - this.safe.bottom - 135, 1);
       c.globalAlpha = 1;
     }
   }

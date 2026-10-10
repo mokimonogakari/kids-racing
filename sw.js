@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the game works offline.
 // HTML/JS/CSS use network-first (fresh when online), icons cache-first.
-const VERSION = 'buubuu-v1';
+const VERSION = 'buubuu-v2-mobile';
 const SHELL = [
   './',
   './index.html',
@@ -34,7 +34,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('buubuu-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });

@@ -67,6 +67,10 @@
 
     <!-- レース中 -->
     <section id="scr-race" class="screen race" aria-label="レース" hidden>
+      <button id="btn-pause" class="race-pause" aria-label="ひとやすみ">Ⅱ</button>
+      <div class="star-goal" aria-live="polite">⭐ <span id="star-count">0 / 5</span></div>
+      <button class="steer-pad steer-left" data-steer="-1" aria-label="ひだりへ">◀</button>
+      <button class="steer-pad steer-right" data-steer="1" aria-label="みぎへ">▶</button>
       <button id="btn-honk" class="round-btn honk" type="button" aria-label="クラクション">
         <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 26h8l22-12v36L18 38h-8z" fill="#ffd23f" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/><circle cx="48" cy="20" r="3.5" fill="#fff"/><path d="M46 32h10M45 22l7-5M45 42l7 5" stroke="#fff" stroke-width="5" stroke-linecap="round"/></svg>
       </button>
@@ -82,6 +86,7 @@
           <canvas class="goal-car" width="320" height="320" aria-hidden="true"></canvas>
         </div>
         <div class="earned" aria-label="もらったシール"></div>
+          <p id="race-record" class="race-record"></p>
         <div class="goal-buttons">
           <button id="btn-again" class="big-btn again" type="button" aria-label="もういっかい">
             <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M48 32a16 16 0 1 1-6-12.5" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/><path d="M36 10 L50 18 L38 28 Z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/></svg>

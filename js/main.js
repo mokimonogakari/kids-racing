@@ -226,6 +226,9 @@ function pickCourse(id, el) {
 const RIVAL_NAMES = { bear: 'くまさん', rabbit: 'うさぎさん', frog: 'かえるさん', pig: 'ぶたさん', cat: 'ねこさん' };
 
 function startRace() {
+  clearInput();
+  resumeRace();
+  $('#star-count').textContent = '0 / 5';
   if (!app.vehicle) app.vehicle = 'car';
   if (!app.course) app.course = 'meadow';
   clearTimeout(app.goalTimer);
@@ -249,12 +252,18 @@ function startRace() {
 
 function raceHooks() {
   return {
+    starReward: () => {
+      sound.whoosh();
+      voice.say('ほしが ５こ！ びゅーん！');
+      renderer.confetti(25);
+    },
     count: () => sound.beep(false),
     go: () => {
       sound.beep(true);
       sound.engineStart();
     },
     collect: (kind, id) => {
+      if (kind === 'star') $('#star-count').textContent = `${app.race.stars % 5} / 5`;
       sound.chime(kind === 'fruit');
       const slot = kind === 'star' ? 0 : 1 + COURSES[app.course].fruits.indexOf(id);
       renderer.burst(renderer.carX, renderer.carY, 10, ['#fff6a8', '#ffd23f', '#ffffff', '#ff9fd1'], 200);
@@ -323,6 +332,12 @@ function onGoal(result) {
 
 function showGoal() {
   show('goal');
+  const recordKey = 'buubuu.best-stars.' + app.course;
+  let best = 0;
+  try { best = Math.max(0, Number(storage.getItem(recordKey)) || 0); } catch {}
+  const stars = app.lastResult.stars;
+  $('#race-record').textContent = `⭐ ${stars}こ あつめた！${stars > best ? ' 🎉 しんきろく！' : ` ベスト ${best}こ`}`;
+  try { storage.setItem(recordKey, String(Math.max(best, stars))); } catch {}
   paintVehicle($('.goal-car'), app.vehicle, true);
   const box = $('.earned');
   box.innerHTML = '';
@@ -369,10 +384,39 @@ function buildBook() {
 // ---------------------------------------------------------------- input
 const pointers = new Map();
 const keys = { left: false, right: false };
+const padPointers = new Map();
+function clearInput() {
+  pointers.clear(); padPointers.clear(); keys.left = keys.right = false;
+  $$('.steer-pad').forEach(b => b.classList.remove('held'));
+}
+for (const b of $$('.steer-pad')) {
+  b.addEventListener('pointerdown', e => {
+    if (app.paused) return;
+    e.preventDefault(); b.setPointerCapture(e.pointerId);
+    padPointers.set(e.pointerId, Number(b.dataset.steer)); b.classList.add('held');
+  });
+  const releasePad = e => { padPointers.delete(e.pointerId); b.classList.remove('held'); };
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(name, releasePad);
+}
+const pausePanel = document.createElement('div');
+pausePanel.className = 'race-break'; pausePanel.hidden = true;
+pausePanel.setAttribute('role', 'dialog'); pausePanel.setAttribute('aria-label', 'ひとやすみ');
+pausePanel.innerHTML = '<div><h2>ひとやすみ</h2><button id="race-resume">▶ つづける</button><button id="race-home">⌂ おうちへ</button></div>';
+document.body.append(pausePanel);
+function pauseRace() {
+  if (app.screen !== 'race') return;
+  setPaused(true); pausePanel.hidden = false; $('#race-resume').focus();
+}
+function resumeRace() { pausePanel.hidden = true; if (!app.settingsOpen) setPaused(false); }
+$('#btn-pause').onclick = pauseRace;
+$('#race-resume').onclick = resumeRace;
+$('#race-home').onclick = () => { leaveRace(); resumeRace(); go('title'); };
+window.addEventListener('blur', () => { clearInput(); pauseRace(); });
 let tilt = { value: 0, active: false };
 
 const raceEl = $('#scr-race');
 raceEl.addEventListener('pointerdown', (e) => {
+  if (app.paused) return;
   if (e.target.closest('button')) return;
   pointers.set(e.pointerId, e.clientX);
   try {
@@ -388,6 +432,8 @@ raceEl.addEventListener('pointercancel', release);
 raceEl.addEventListener('lostpointercapture', release);
 
 window.addEventListener('keydown', (e) => {
+  if (app.screen !== 'race' || app.paused) return;
+  if (['ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
   if (e.key === 'ArrowLeft') keys.left = true;
   if (e.key === 'ArrowRight') keys.right = true;
   if (e.key === ' ' && app.race && app.screen === 'race') app.race.honk();
@@ -421,6 +467,7 @@ function enableTilt(on) {
 }
 
 function currentSteer() {
+  if (padPointers.size) return Array.from(padPointers.values()).at(-1);
   let steer = 0;
   if (pointers.size) {
     const last = Array.from(pointers.values()).pop();
@@ -435,7 +482,7 @@ function currentSteer() {
 
 $('#btn-honk').addEventListener('click', (e) => {
   e.stopPropagation();
-  if (app.race) app.race.honk();
+  if (app.race && !app.paused) app.race.honk();
   const b = e.currentTarget;
   b.classList.remove('toot');
   void b.offsetWidth;
@@ -494,6 +541,7 @@ window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 function setPaused(p) {
   app.paused = p;
   if (p) {
+    clearInput();
     sound.engineStop();
     sound.suspend();
     voice.stop();
@@ -503,8 +551,8 @@ function setPaused(p) {
   }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) setPaused(true);
-  else if (!app.settingsOpen) setPaused(false);
+  if (document.hidden) { setPaused(true); pauseRace(); }
+  else if (!app.settingsOpen && pausePanel.hidden) setPaused(false);
 });
 window.addEventListener('pagehide', () => setPaused(true));
 
@@ -608,7 +656,7 @@ function openSettings() {
 function closeSettings() {
   app.settingsOpen = false;
   $('#settings').hidden = true;
-  setPaused(false);
+  setPaused(!pausePanel.hidden);
 }
 function applySettings() {
   saveSettings(storage, settings);

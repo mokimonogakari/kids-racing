@@ -14,6 +14,16 @@
   --sal: env(safe-area-inset-left, 0px);
 }
 
+/* Finger-sized controls stay outside the road's sight line. */
+.steer-pad{position:absolute;bottom:calc(var(--sab) + 18px);width:clamp(82px,23vw,140px);height:82px;border:4px solid #fff;border-radius:26px;background:#ffffffd9;color:#3d2c3e;font-size:38px;box-shadow:0 5px 0 #3d2c3e55;touch-action:none}
+.steer-left{left:calc(var(--sal) + 16px)}.steer-right{right:calc(var(--sar) + 16px)}.steer-pad.held{background:#ffd23f;transform:translateY(4px)}
+.race-pause{position:absolute;top:calc(var(--sat) + 110px);right:calc(var(--sar) + 12px);width:56px;height:56px;border-radius:18px;background:#fff;font-size:25px;z-index:2}
+.star-goal{position:absolute;top:calc(var(--sat) + 110px);left:calc(var(--sal) + 12px);background:#fff6cb;padding:8px 12px;border-radius:16px;font-size:18px;font-weight:900;pointer-events:none}
+.race-record{margin:0;text-align:center;font-size:16px;font-weight:900}
+.race-break{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:#213249b8;padding:16px}
+.race-break>div{width:min(360px,100%);padding:24px;display:grid;gap:16px;background:#fff;border-radius:30px;text-align:center}.race-break h2{margin:0}.race-break button{min-height:80px;border-radius:20px;background:#ffd23f;font-size:24px;font-weight:900}.race-break button+button{background:#dcefff}
+@media(max-height:430px){.steer-pad{height:72px;bottom:calc(var(--sab) + 10px)}.star-goal{font-size:15px}.race-record{font-size:13px}.goal-card{gap:4px!important}.earned canvas{width:44px;height:44px}.earned{min-height:44px}.goal-card .big-btn{width:80px;height:80px}.goal-hero{grid-row:1 / 4!important}}
+
 * { box-sizing: border-box; }
 
 html, body {
