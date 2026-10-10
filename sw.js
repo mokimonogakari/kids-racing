@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the game works offline.
 // HTML/JS/CSS use network-first (fresh when online), icons cache-first.
-const VERSION = 'buubuu-v2-mobile';
+const VERSION = 'buubuu-v3-voice';
 const SHELL = [
   './',
   './index.html',

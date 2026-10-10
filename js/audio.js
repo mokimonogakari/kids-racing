@@ -102,7 +102,13 @@ export class Sound {
 
   setMusic(on) {
     this.musicOn = on;
-    if (this.mus) this.mus.gain.setTargetAtTime(on ? 0.13 : 0, this.ctx.currentTime, 0.1);
+    if (this.mus) this.mus.gain.setTargetAtTime(on ? (this.voiceActive ? 0.035 : 0.13) : 0, this.ctx.currentTime, 0.1);
+  }
+
+  duckVoice(active) {
+    this.voiceActive = active;
+    this.setMusic(this.musicOn);
+    if (this.sfx) this.sfx.gain.setTargetAtTime(this.sfxOn ? (active ? .24 : .55) : 0, this.ctx.currentTime, .08);
   }
 
   suspend() {

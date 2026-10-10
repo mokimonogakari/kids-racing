@@ -19,7 +19,14 @@ const storage = getStorage();
 const settings = loadSettings(storage);
 const book = createStickerBook(storage);
 const sound = new Sound();
-const voice = new Voice();
+const caption = document.createElement('div');
+caption.className = 'voice-caption'; caption.setAttribute('role', 'status'); caption.hidden = true;
+document.body.append(caption);
+let captionTimer;
+const voice = new Voice({
+  onActivity: active => sound.duckVoice(active),
+  onText: text => { clearTimeout(captionTimer); caption.textContent = text; caption.hidden = false; captionTimer = setTimeout(() => caption.hidden = true, 3500); },
+});
 const canvas = $('#game');
 const renderer = new Renderer(canvas);
 
@@ -246,7 +253,7 @@ function startRace() {
   });
   show('race');
   sound.playMusic(COURSES[app.course].music);
-  voice.say('よーい、どん！');
+  voice.say('よーい！');
   lastT = 0;
 }
 
@@ -259,6 +266,7 @@ function raceHooks() {
     },
     count: () => sound.beep(false),
     go: () => {
+      voice.say('どん！');
       sound.beep(true);
       sound.engineStart();
     },
