@@ -273,7 +273,7 @@ export class Renderer {
     const jump = race.jump > 0 ? Math.abs(Math.sin(race.jump * Math.PI * 3)) * 0.35 * (race.jump / 0.9) : 0;
     const rivalsBySeg = new Map();
     for (const r of race.rivals) {
-      if (r.z < p.z + 220) continue; // next to / behind the player: would fill the screen near the camera
+      if (r.z < p.z + 700) continue; // next to / just ahead of / behind the player: would fill the screen near the camera
       const ri = Math.floor(r.z / SEGMENT_LENGTH);
       if (ri >= baseI && ri < baseI + DRAW) rivalsBySeg.set(ri, (rivalsBySeg.get(ri) || []).concat(r));
     }
