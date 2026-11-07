@@ -22,7 +22,7 @@
 .race-record{margin:0;text-align:center;font-size:clamp(13px,3.8vw,16px);font-weight:900;line-height:1.4}
 .race-break{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:#213249b8;padding:16px}
 .race-break>div{width:min(360px,100%);padding:24px;display:grid;gap:16px;background:#fff;border-radius:30px;text-align:center}.race-break h2{margin:0}.race-break button{min-height:80px;border-radius:20px;background:#ffd23f;font-size:24px;font-weight:900}.race-break button+button{background:#dcefff}
-@media(max-height:430px){.steer-pad{height:72px;bottom:calc(var(--sab) + 10px)}.star-goal{font-size:15px}.race-record{font-size:13px}.goal-card{gap:4px!important;padding:8px 12px!important}.earned canvas{width:40px;height:40px}.earned{min-height:40px}.goal-card .big-btn{width:76px;height:76px}.goal-hero{grid-row:1 / 5!important}.goal-buttons{gap:16px}.medal{width:84px}.goal-car{width:120px!important;height:120px!important}.podium .step canvas{width:46px;height:46px}.podium .step .place{height:26px;font-size:16px}.podium .p1 .place{height:38px}.podium .p3 .place{height:20px}.your-place canvas{width:40px;height:40px}.your-place b{font-size:18px}}
+@media(max-height:430px){.steer-pad{height:72px;bottom:calc(var(--sab) + 10px)}.boost{width:80px;height:80px;bottom:calc(var(--sab) + 8px)}.honk{width:54px;height:54px;bottom:calc(var(--sab) + 96px)}.grid-intro{bottom:calc(var(--sab) + 92px)}.grid-intro .gcard{width:44px}.results .row{font-size:11px}.star-goal{font-size:15px}.race-record{font-size:13px}.goal-card{gap:4px!important;padding:8px 12px!important}.earned canvas{width:40px;height:40px}.earned{min-height:40px}.goal-card .big-btn{width:76px;height:76px}.goal-hero{grid-row:1 / 5!important}.goal-buttons{gap:16px}.medal{width:84px}.goal-car{width:120px!important;height:120px!important}.podium .step canvas{width:46px;height:46px}.podium .step .place{height:26px;font-size:16px}.podium .p1 .place{height:38px}.podium .p3 .place{height:20px}.your-place canvas{width:40px;height:40px}.your-place b{font-size:18px}}
 
 * { box-sizing: border-box; }
 
@@ -174,6 +174,8 @@ svg { display: block; pointer-events: none; }
 .big-btn:active { transform: translateY(5px) scale(.97); box-shadow: 0 3px 0 rgba(61, 44, 62, .35); }
 .big-btn svg { width: 64%; height: 64%; }
 .play { background: var(--green); animation: breathe 1.6s ease-in-out infinite; }
+.gp { background: #a77bff; }
+.next { background: var(--green); }
 @keyframes breathe { 50% { transform: scale(1.07); } }
 
 .round-btn {
@@ -246,6 +248,22 @@ svg { display: block; pointer-events: none; }
   pointer-events: none;
   opacity: .8;
 }
+.card .stats {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .72);
+  pointer-events: none;
+}
+.card .stats i { display: flex; align-items: center; gap: 2px; font-style: normal; }
+.card .stats em { font-style: normal; font-size: 9px; font-weight: 900; color: var(--ink); width: 30px; text-align: left; }
+.card .stats b, .card .stats s { width: 7px; height: 7px; border-radius: 2px; background: var(--pink); text-decoration: none; }
+.card .stats s { background: rgba(61, 44, 62, .18); }
 .card.chosen { animation: chosen .9s cubic-bezier(.2, 1.6, .4, 1); z-index: 2; }
 @keyframes chosen { 0% { transform: scale(1); } 30% { transform: scale(1.12) rotate(-3deg); } 60% { transform: scale(1.06) rotate(3deg); } 100% { transform: scale(1.08); } }
 .grid.picked .card:not(.chosen) { opacity: .45; transform: scale(.94); transition: opacity .3s, transform .3s; }
@@ -255,17 +273,76 @@ svg { display: block; pointer-events: none; }
 .race { padding: 0; background: transparent; touch-action: none; }
 .honk {
   position: absolute;
-  left: 50%;
-  bottom: calc(var(--sab) + 14px);
-  translate: -50% 0;
-  width: 92px;
-  height: 92px;
+  left: calc(var(--sal) + 22px);
+  bottom: calc(var(--sab) + 118px);
+  width: 64px;
+  height: 64px;
   background: var(--pink);
   border-color: #fff;
-  border-width: 5px;
+  border-width: 4px;
 }
 .honk.toot { animation: toot .35s; }
 @keyframes toot { 50% { transform: scale(1.18); } }
+/* ブースト: ほしが5こ たまると光る、おすと びゅーん */
+.boost {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--sab) + 12px);
+  translate: -50% 0;
+  width: 100px;
+  height: 100px;
+  background: #cfc8d8;
+  border: 5px solid #fff;
+  opacity: .6;
+  transition: background .25s, opacity .25s;
+}
+.boost svg { width: 60%; height: 60%; }
+.boost svg path { fill: #ece8f2; }
+.boost.ready {
+  opacity: 1;
+  background: var(--yellow);
+  animation: boost-glow .9s ease-in-out infinite;
+}
+.boost.ready svg path { fill: #fff; }
+@keyframes boost-glow {
+  0%, 100% { box-shadow: 0 6px 0 rgba(61, 44, 62, .3), 0 0 0 0 rgba(255, 210, 63, .9); transform: scale(1); }
+  50% { box-shadow: 0 6px 0 rgba(61, 44, 62, .3), 0 0 0 18px rgba(255, 210, 63, 0); transform: scale(1.08); }
+}
+.boost.fire { animation: boost-fire .5s; }
+@keyframes boost-fire { 30% { transform: scale(1.3); background: #fff; } }
+/* スタートグリッド紹介（カウントダウン中だけ、6台を並び順に） */
+.grid-intro {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--sab) + 118px);
+  translate: -50% 0;
+  display: flex;
+  gap: 5px;
+  padding: 6px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .78);
+  pointer-events: none;
+  z-index: 1;
+  animation: pop-in .4s cubic-bezier(.2, 1.4, .5, 1);
+  transition: opacity .6s, transform .6s;
+}
+.grid-intro.out { opacity: 0; transform: translateY(20px); }
+.grid-intro .gcard {
+  position: relative;
+  width: clamp(44px, 12vw, 58px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 0 3px;
+  border-radius: 12px;
+  background: #fff;
+  border: 2px solid #e7e0ee;
+}
+.grid-intro .gcard canvas { width: 100%; aspect-ratio: 1; display: block; }
+.grid-intro .gcard b { position: absolute; left: 2px; top: 2px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--ink); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
+.grid-intro .gcard span { font-size: 10px; font-weight: 900; color: var(--ink); white-space: nowrap; }
+.grid-intro .gcard.you { border-color: var(--yellow); box-shadow: 0 0 0 3px rgba(255, 210, 63, .7); }
 
 /* ---------- goal ---------- */
 .goal { justify-content: center; background: rgba(255, 255, 255, .25); }
@@ -285,10 +362,10 @@ svg { display: block; pointer-events: none; }
   animation: pop-in .5s cubic-bezier(.2, 1.5, .5, 1);
 }
 .goal-hero { display: flex; align-items: center; justify-content: center; gap: 4px; flex: none; }
-.medal { width: clamp(96px, 26vw, 150px); flex: none; animation: swing 2s ease-in-out infinite; transform-origin: 50% 0; }
+.medal { width: clamp(90px, 24vw, 136px); flex: none; animation: swing 2s ease-in-out infinite; transform-origin: 50% 0; }
 .medal canvas { display: block; width: 100%; aspect-ratio: 1; }
 @keyframes swing { 50% { transform: rotate(6deg); } }
-.goal-car { width: clamp(120px, 36vw, 190px); height: clamp(120px, 36vw, 190px); flex: none; animation: bounce .8s ease-in-out infinite; }
+.goal-car { width: clamp(110px, 32vw, 170px); height: clamp(110px, 32vw, 170px); flex: none; animation: bounce .8s ease-in-out infinite; }
 
 /* 表彰台: 左から 2位・1位・3位（JS が .step.p2 / .p1 / .p3 の順に入れる） */
 .podium {
@@ -357,6 +434,33 @@ svg { display: block; pointer-events: none; }
 }
 .your-place b { font-size: 26px; font-weight: 900; color: var(--ink); white-space: nowrap; }
 
+/* リザルト: 6台のタイム／ギャップ（2列） */
+.results {
+  width: 100%;
+  max-width: 400px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  flex: none;
+}
+.results:empty { display: none; }
+.results .row {
+  display: grid;
+  grid-template-columns: 18px 26px 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--ink);
+  background: rgba(243, 238, 247, .9);
+}
+.results .row canvas { width: 26px; height: 26px; }
+.results .row .pos { text-align: center; }
+.results .row .time { font-variant-numeric: tabular-nums; color: #6b5a6d; }
+.results .row.you { background: #fff1b8; box-shadow: inset 0 0 0 2px var(--yellow); }
+.results .row.you .time { color: var(--ink); }
 .earned { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; min-height: 56px; flex: none; }
 .earned canvas { width: 56px; height: 56px; animation: sticker-in .5s cubic-bezier(.2, 1.6, .4, 1) both; }
 @keyframes sticker-in { from { transform: scale(0) rotate(-30deg); } to { transform: none; } }
@@ -402,6 +506,51 @@ svg { display: block; pointer-events: none; }
   .logo .l3 { margin-top: 0; font-size: 16px; padding: 3px 12px; }
   #scr-title { flex-direction: row; flex-wrap: wrap; justify-content: center; align-content: center; gap: 4px 28px; }
   #scr-title .logo { flex-basis: 100%; flex-direction: row; align-items: center; gap: 12px; }
+}
+
+/* ---------- grand prix: standings & cup ---------- */
+.gp-title { margin: 0; font-size: clamp(22px, 6vw, 30px); color: var(--ink); text-align: center; }
+.gp-title small { font-size: 14px; color: #6b5a6d; margin-left: 6px; }
+.standings-list { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 6px; }
+.standings-list .row {
+  display: grid;
+  grid-template-columns: 34px 48px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  background: #f3eef7;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--ink);
+  animation: step-in .4s cubic-bezier(.2, 1.4, .5, 1) both;
+}
+.standings-list .row:nth-child(2) { animation-delay: .06s; }
+.standings-list .row:nth-child(3) { animation-delay: .12s; }
+.standings-list .row:nth-child(4) { animation-delay: .18s; }
+.standings-list .row:nth-child(5) { animation-delay: .24s; }
+.standings-list .row:nth-child(6) { animation-delay: .3s; }
+.standings-list .row canvas { width: 48px; height: 48px; }
+.standings-list .row .pos { text-align: center; font-size: 22px; }
+.standings-list .row:nth-child(1) .pos { color: #e08a00; }
+.standings-list .row .pts { font-variant-numeric: tabular-nums; }
+.standings-list .row.you { background: #fff1b8; box-shadow: inset 0 0 0 3px var(--yellow); }
+.standings-list.small .row { font-size: 14px; padding: 2px 8px; gap: 6px; grid-template-columns: 26px 32px 1fr auto; }
+.standings-list.small .row canvas { width: 32px; height: 32px; }
+.standings-list.small .row .pos { font-size: 16px; }
+.cup-hero { display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; }
+#cup-canvas { width: clamp(120px, 34vw, 180px); height: clamp(120px, 34vw, 180px); animation: swing 2s ease-in-out infinite; transform-origin: 50% 100%; }
+#cup-champ { width: clamp(110px, 32vw, 170px); height: clamp(110px, 32vw, 170px); animation: bounce .8s ease-in-out infinite; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .standings-card, .cup-card { display: flex !important; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .gp-title { flex-basis: 100%; font-size: 20px; }
+  .standings-list { max-width: 360px; gap: 3px; }
+  .standings-list .row { font-size: 14px; padding: 2px 8px; }
+  .standings-list .row canvas { width: 34px; height: 34px; }
+  .standings-list .row .pos { font-size: 16px; }
+  #cup-canvas, #cup-champ { width: 110px; height: 110px; }
+  .results { gap: 2px 8px; }
+  .results .row { font-size: 11px; }
 }
 
 /* ---------- sticker book ---------- */
@@ -524,5 +673,7 @@ svg { display: block; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01s !important; animation-iteration-count: 1 !important; }
 }
+body.intro .voice-caption{bottom:calc(var(--sab) + 212px)}
+@media(max-height:430px){body.intro .voice-caption{bottom:calc(var(--sab) + 170px)}}
 .voice-caption{position:fixed;z-index:25;left:50%;bottom:calc(var(--sab) + 120px);transform:translateX(-50%);max-width:85vw;padding:9px 16px;border-radius:20px;background:#fffef2ed;color:#3d2c3e;font-size:16px;font-weight:800;text-align:center;pointer-events:none;box-shadow:0 3px 10px #0002}
 @media(max-height:430px){.voice-caption{bottom:calc(var(--sab) + 92px);font-size:14px;padding:5px 12px}}

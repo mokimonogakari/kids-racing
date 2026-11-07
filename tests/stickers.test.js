@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStickerBook, stickersForRace, medalForRank, STICKERS, MEDAL_STICKERS, STICKER_KEY } from '../js/stickers.js';
+import { createStickerBook, stickersForRace, medalForRank, cupForRank, STICKERS, MEDAL_STICKERS, CUP_STICKERS, STICKER_KEY } from '../js/stickers.js';
+import { MEDAL_SPRITES, medalBg, drawTrophy, drawCup, cupMetal } from '../js/art-medals.js';
 import { loadSettings, saveSettings, sanitizeSettings, DEFAULT_SETTINGS } from '../js/settings.js';
 
 function memoryStorage(initial = {}) {
@@ -45,6 +46,44 @@ test('a finishing rank adds the medal (or the finisher ribbon) first', () => {
   assert.equal(medalForRank(1), 'gold');
   assert.equal(medalForRank(6), 'ribbon');
   assert.equal(medalForRank(undefined), null);
+});
+
+test('grand prix cups are stickers of their own and never come from a single race', () => {
+  assert.deepEqual(CUP_STICKERS, ['cup', 'cup-silver', 'cup-bronze']);
+  for (const id of CUP_STICKERS) assert.ok(STICKERS.includes(id));
+  assert.ok(STICKERS.indexOf('cup') > STICKERS.indexOf('ribbon'), 'cups sit right after the medals');
+  assert.ok(STICKERS.indexOf('cup-bronze') < STICKERS.indexOf('apple'));
+  assert.equal(cupForRank(1), 'cup');
+  assert.equal(cupForRank(2), 'cup-silver');
+  assert.equal(cupForRank(3), 'cup-bronze');
+  assert.equal(cupForRank(4), null);
+  assert.equal(cupForRank(NaN), null);
+  // a race result on its own never hands out a cup
+  const ids = stickersForRace({ vehicle: 'car', course: 'meadow', stars: 2, fruits: {}, rank: 1 });
+  assert.ok(!ids.some((id) => CUP_STICKERS.includes(id)));
+  // the book accepts them like any other sticker
+  const b = createStickerBook(memoryStorage());
+  assert.deepEqual(b.add(['cup']), ['cup']);
+  assert.equal(b.count('cup'), 1);
+  assert.deepEqual(b.add(['cup', 'cup-silver']), ['cup-silver']);
+  assert.equal(b.count('cup'), 2);
+});
+
+test('cup sprites draw without errors and have their own backgrounds', () => {
+  const noop = new Proxy({}, { get: (_, k) => (k === 'canvas' ? { width: 100, height: 120 } : () => 0), set: () => true });
+  for (const id of CUP_STICKERS) {
+    const def = MEDAL_SPRITES[id];
+    assert.ok(def, `${id} sprite exists`);
+    assert.deepEqual(def.box, [100, 120]);
+    assert.doesNotThrow(() => def.draw(noop, 0));
+    assert.notEqual(medalBg(id), '#fff', `${id} has a background colour`);
+  }
+  assert.equal(cupMetal('cup'), 'gold');
+  assert.equal(cupMetal('cup-silver'), 'silver');
+  assert.equal(cupMetal('cup-bronze'), 'bronze');
+  assert.doesNotThrow(() => drawTrophy(noop, 120));
+  assert.doesNotThrow(() => drawCup(noop, 80, 'bronze'));
+  assert.doesNotThrow(() => drawCup(noop, 80, 'unknown-metal'));
 });
 
 test('sticker book persists across reloads', () => {

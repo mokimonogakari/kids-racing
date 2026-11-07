@@ -1,6 +1,7 @@
 // Pseudo-3D road renderer (classic arcade style) + HUD + particles.
 import { SEGMENT_LENGTH, clamp } from './physics.js';
-import { SPRITES, spriteImage, rrect } from './art.js';
+import { SPRITES, spriteImage, rrect, ANIMAL_COLORS } from './art.js';
+import { drawMinimap } from './minimap.js';
 import { START_LINE } from './course.js';
 import { drawRankBadge, drawSpeedo, drawPositionBar, drawFlash, drawStartLights } from './render-hud.js';
 
@@ -43,6 +44,7 @@ const PALETTES = {
   },
 };
 const BOOST_COLS = ['#ff7eb6', '#ffd23f', '#5ce1e6'];
+const RIVAL_SHORT = { bear: 'くま', rabbit: 'うさぎ', frog: 'かえる', pig: 'ぶた', cat: 'ねこ' };
 const RAINBOW = ['#ff5a6e', '#ffd23f', '#5cc75c', '#4aa8ff', '#a77bff'];
 
 export class Renderer {
@@ -440,6 +442,46 @@ export class Renderer {
       }
     }
     this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, x, ry, rr, 0.75, hop * rr * this.SX, clip, rot);
+    // name tag over nearby karts, so the child knows who is who
+    if (Math.abs(ri.z - race.player.z) < 1600) {
+      const dw = 0.75 * rr * this.SX;
+      if (dw >= 24) {
+        const dh = dw * 1.1;
+        const lift = hop * rr * this.SX;
+        this.nameTag(ri.animal, x, ry - dh - lift - dw * 0.08, dw);
+      }
+    }
+  }
+
+  /** Small white label ("くま 1") floating above a rival kart. */
+  nameTag(animal, x, y, dw) {
+    const c = this.c;
+    const col = (ANIMAL_COLORS && ANIMAL_COLORS[animal]) || { kart: '#4aa8ff', number: 0 };
+    const label = `${RIVAL_SHORT[animal] || animal} ${col.number || ''}`.trim();
+    const size = Math.max(11, Math.min(20, dw * 0.13));
+    c.save();
+    c.font = `900 ${Math.round(size)}px "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", system-ui, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const tw = c.measureText(label).width + size * 1.1;
+    const th = size * 1.5;
+    rrect(c, x - tw / 2, y - th / 2, tw, th, th / 2);
+    c.fillStyle = 'rgba(255,255,255,0.92)';
+    c.fill();
+    c.lineWidth = Math.max(1.5, size * 0.14);
+    c.strokeStyle = col.kart;
+    c.stroke();
+    c.fillStyle = '#3d2c3e';
+    c.fillText(label, x, y + size * 0.05);
+    // little pointer toward the kart
+    c.beginPath();
+    c.moveTo(x - size * 0.35, y + th / 2 - 1);
+    c.lineTo(x, y + th / 2 + size * 0.4);
+    c.lineTo(x + size * 0.35, y + th / 2 - 1);
+    c.closePath();
+    c.fillStyle = col.kart;
+    c.fill();
+    c.restore();
   }
 
   drawSun(courseId, t) {
@@ -858,7 +900,12 @@ export class Renderer {
       c.globalAlpha = 1;
     }
 
-    // speedometer and pop-up words on top of everything
+    // course map, speedometer and pop-up words on top of everything
+    try {
+      drawMinimap(hv, race, t);
+    } catch (e) {
+      /* the map is optional */
+    }
     drawSpeedo(hv, race, t);
     drawFlash(hv, t);
   }

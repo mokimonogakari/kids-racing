@@ -5,16 +5,28 @@ export const VEHICLE_IDS = ['car', 'fire', 'bus', 'police', 'ambulance', 'dino']
 
 /** Medal stickers for the finishing position: 1st, 2nd, 3rd, and the finisher's ribbon. */
 export const MEDAL_STICKERS = ['gold', 'silver', 'bronze', 'ribbon'];
+/** Grand Prix cups: overall champion, 2nd and 3rd over the series. */
+export const CUP_STICKERS = ['cup', 'cup-silver', 'cup-bronze'];
 
 export const STICKERS = [
   'star',
   ...MEDAL_STICKERS,
+  ...CUP_STICKERS,
   'apple', 'strawberry', 'watermelon', 'pineapple', 'mikan', 'grape',
   'cow', 'whale', 'snowman',
   ...VEHICLE_IDS.map((v) => 'v-' + v),
 ];
 
 export const STICKER_KEY = 'buubuu-race.stickers.v1';
+
+/** Grand Prix cup sticker for an overall rank (1 = gold cup, 2 = silver, 3 = bronze, else none). */
+export function cupForRank(rank) {
+  if (!Number.isFinite(rank)) return null;
+  if (rank <= 1) return 'cup';
+  if (rank === 2) return 'cup-silver';
+  if (rank === 3) return 'cup-bronze';
+  return null;
+}
 
 /** Medal sticker id for a finishing rank (1 = gold, 2 = silver, 3 = bronze, else ribbon). */
 export function medalForRank(rank) {

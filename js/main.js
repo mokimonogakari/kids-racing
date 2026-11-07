@@ -5,13 +5,15 @@ import { Renderer } from './render.js';
 import { Race } from './race.js';
 import { COURSES, COURSE_IDS } from './course.js';
 import { VEHICLES, drawVehicleFront, drawAnimalKart, drawCourseTile, drawSticker } from './art.js';
-import { drawMedal } from './art-medals.js';
+import { drawMedal, drawTrophy } from './art-medals.js';
+import { createGrandPrix, formatGap } from './gp.js';
+import { statBars } from './vehicle-stats.js';
 import { STICKERS, createStickerBook, stickersForRace } from './stickers.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { getStorage } from './storage.js';
 import { createRecords, formatTime } from './records.js';
 import * as L from './voice-lines.js';
-import { steerFromPointer, steerFromTilt } from './physics.js';
+import { steerFromPointer, steerFromTilt, clamp } from './physics.js';
 
 const params = new URLSearchParams(location.search);
 const FAST = params.get('fast') === '1';
@@ -53,7 +55,16 @@ const app = {
   lastResult: null,
   recordInfo: null,
   earned: [],
+  mode: 'single', // 'single' | 'gp'
+  gp: null,
 };
+
+// Voice lines that may not exist yet in voice-lines.js get a plain fallback.
+const say = (fn, fallback, ...args) => (typeof L[fn] === 'function' ? L[fn](...args) : fallback);
+const STAT_LABEL = { speed: 'はやさ', accel: 'かそく', grip: 'まがる' };
+const COURSE_NAME = { meadow: 'はらっぱ', sea: 'うみ', snow: 'ゆきやま' };
+const racerName = (id) => (id === 'player' ? 'あなた' : (L.RIVAL_NAMES && L.RIVAL_NAMES[id]) || id);
+const shortName = (id) => racerName(id).replace(/さん$/, '');
 
 // ---------------------------------------------------------------- audio unlock
 function unlockAudio() {
@@ -90,7 +101,7 @@ function show(name) {
     sec.hidden = !on;
     sec.classList.toggle('enter', on);
   }
-  document.body.classList.toggle('racing', name === 'race' || name === 'goal');
+  document.body.classList.toggle('racing', ['race', 'goal', 'standings', 'cup'].includes(name));
   if (name === 'title' || name === 'vehicle' || name === 'course' || name === 'book') {
     sound.playMusic('menu');
   }
@@ -201,7 +212,11 @@ function buildMenus() {
     b.setAttribute('aria-label', v.label);
     b.dataset.vehicle = v.id;
     b.style.background = CARD_BG[v.id];
-    b.innerHTML = `<canvas class="vcanvas" aria-hidden="true"></canvas><span class="label" aria-hidden="true">${v.label}</span>`;
+    const bars = statBars(v.id);
+    const stats = ['speed', 'accel', 'grip']
+      .map((k) => `<i><em>${STAT_LABEL[k]}</em>${'<b></b>'.repeat(bars[k])}${'<s></s>'.repeat(Math.max(0, 5 - bars[k]))}</i>`)
+      .join('');
+    b.innerHTML = `<canvas class="vcanvas" aria-hidden="true"></canvas><span class="label" aria-hidden="true">${v.label}</span><span class="stats" aria-hidden="true">${stats}</span>`;
     b.addEventListener('click', () => pickVehicle(v.id, b));
     vg.appendChild(b);
   }
@@ -242,7 +257,13 @@ function pickVehicle(id, el) {
   voice.say(VEHICLE_SAY[id]);
   setTimeout(() => {
     app.busy = false;
-    go('course');
+    if (app.mode === 'gp' && app.gp) {
+      app.course = app.gp.nextCourse() || 'meadow';
+      voice.say(say('gpNextLine', `さいしょは ${COURSE_NAME[app.course]}！`, app.course), { interrupt: false });
+      startRace();
+    } else {
+      go('course');
+    }
   }, 1100);
 }
 
@@ -285,8 +306,55 @@ function startRace() {
   });
   show('race');
   sound.playMusic(COURSES[app.course].music);
+  updateStarHud();
+  btnBoost?.classList.remove('ready', 'fire');
+  buildGridIntro();
   voice.say(L.startLine());
   lastT = 0;
+}
+
+/** "⭐ n / 5": stars collected toward the next boost. */
+function updateStarHud() {
+  const r = app.race;
+  if (!r) return;
+  const charge = Number.isFinite(r.boostCharge) ? r.boostCharge : r.stars % 5;
+  $('#star-count').textContent = `${charge} / 5`;
+}
+
+// ---------------------------------------------------------------- start grid intro
+function buildGridIntro() {
+  const el = $('#grid-intro');
+  if (!el || !app.race) return;
+  const race = app.race;
+  const entries = [...race.rivals.map((r) => ({ id: r.animal, z: r.z })), { id: 'player', z: race.player.z }].sort((a, b) => b.z - a.z);
+  el.innerHTML = '';
+  for (const [i, e] of entries.entries()) {
+    const card = document.createElement('div');
+    card.className = 'gcard' + (e.id === 'player' ? ' you' : '');
+    card.innerHTML = `<canvas aria-hidden="true"></canvas><b>${i + 1}</b><span>${shortName(e.id)}</span>`;
+    el.appendChild(card);
+  }
+  el.hidden = false;
+  el.classList.remove('out');
+  document.body.classList.add('intro');
+  requestAnimationFrame(() => {
+    entries.forEach((e, i) => {
+      const cv = el.children[i] && $('canvas', el.children[i]);
+      if (!cv) return;
+      if (e.id === 'player') paintVehicle(cv, app.vehicle);
+      else paintKart(cv, e.id, 0);
+    });
+  });
+  voice.say(say('gridIntroLine', 'みんな ならんだよ！'), { interrupt: false });
+}
+function hideGridIntro() {
+  const el = $('#grid-intro');
+  document.body.classList.remove('intro');
+  if (!el || el.hidden) return;
+  el.classList.add('out');
+  setTimeout(() => {
+    el.hidden = true;
+  }, 700);
 }
 
 function raceHooks() {
@@ -301,12 +369,27 @@ function raceHooks() {
       if (left === 1) sound.rev?.();
     },
     go: () => {
+      hideGridIntro();
       voice.say(L.goLine());
       sound.beep(true);
       sound.engineStart();
     },
+    boostReady: () => {
+      btnBoost?.classList.add('ready');
+      sound.chime(true);
+      voice.say(say('boostReadyLine', 'ほしが たまった！ きいろい ボタンを おして！'));
+      updateStarHud();
+    },
+    boostUsed: () => {
+      btnBoost?.classList.remove('ready');
+      pulse(btnBoost, 'fire');
+      sound.whoosh();
+      voice.say(say('boostUsedLine', 'びゅーん！'));
+      renderer.confetti(20);
+      updateStarHud();
+    },
     collect: (kind, id) => {
-      if (kind === 'star') $('#star-count').textContent = `${app.race.stars % 5} / 5`;
+      if (kind === 'star') updateStarHud();
       sound.chime(kind === 'fruit');
       const slot = kind === 'star' ? 0 : 1 + COURSES[app.course].fruits.indexOf(id);
       renderer.burst(renderer.carX, renderer.carY, 10, ['#fff6a8', '#ffd23f', '#ffffff', '#ff9fd1'], 200);
@@ -403,6 +486,13 @@ function onGoal(result) {
   app.earned = earned;
   app.fresh = book.add(earned);
   app.recordInfo = records.update(app.course, result);
+  if (app.mode === 'gp' && app.gp) {
+    try {
+      app.gp.addResult(result);
+    } catch (e) {
+      /* a broken series must not break the goal */
+    }
+  }
   clearTimeout(app.goalTimer);
   app.goalTimer = setTimeout(showGoal, FAST ? 1800 : 2600);
 }
@@ -485,12 +575,157 @@ function paintGoal() {
     paintCanvas(cv, (c, w) => drawSticker(c, id, w, true));
   });
 
+  // Results: everyone's time (winner) or gap to the winner.
+  const res = $('#results');
+  if (res) {
+    res.innerHTML = '';
+    const order = result.order || [];
+    const me = order.find((e) => e.id === 'player');
+    // order[i].time includes the countdown when it comes from race time; line it up with raceTime.
+    const offset = me && Number.isFinite(me.time) && Number.isFinite(result.raceTime) ? me.time - result.raceTime : 0;
+    const t1 = order[0] && Number.isFinite(order[0].time) ? order[0].time : NaN;
+    const rows = [];
+    order.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'row' + (e.id === 'player' ? ' you' : '');
+      row.setAttribute('role', 'listitem');
+      let t = '—';
+      if (Number.isFinite(e.time)) t = i === 0 || !Number.isFinite(t1) ? formatTime(Math.max(0, e.time - offset)) : formatGap(e.time - t1);
+      row.innerHTML = `<b class="pos">${i + 1}</b><canvas aria-hidden="true"></canvas><span class="name">${shortName(e.id)}</span><span class="time">${t}</span>`;
+      res.appendChild(row);
+      rows.push([row, e]);
+    });
+    for (const [row, e] of rows) {
+      const cv = $('canvas', row);
+      if (e.id === 'player') paintVehicle(cv, app.vehicle);
+      else paintKart(cv, e.id, 0);
+    }
+  }
+  const gpMode = app.mode === 'gp' && !!app.gp;
+  const bNext = $('#btn-next');
+  if (bNext) bNext.hidden = !gpMode;
+  $('#btn-again').hidden = gpMode;
+  $('#btn-other').hidden = gpMode;
+
   // One-line record: place, stars, time, and any new best.
   const info = app.recordInfo || {};
   let line = `🏁 ${rank}い　⭐ ${result.stars}こ　⏱ ${formatTime(result.raceTime || 0)}`;
   if (info.newBestTime) line += ' 🎉 しんきろく！';
   if (info.firstWin) line += ' 🏆 はじめての ゆうしょう！';
   $('#race-record').textContent = line;
+}
+
+// ---------------------------------------------------------------- grand prix
+function paintRacer(cv, id, frame = 1) {
+  if (id === 'player') paintVehicle(cv, app.vehicle);
+  else paintKart(cv, id, frame);
+}
+
+function fillStandings(list, standings, small = false) {
+  if (!list) return;
+  list.innerHTML = '';
+  const rows = [];
+  for (const e of standings) {
+    const row = document.createElement('div');
+    row.className = 'row' + (e.id === 'player' ? ' you' : '');
+    row.setAttribute('role', 'listitem');
+    row.innerHTML = `<b class="pos">${e.rank}</b><canvas aria-hidden="true"></canvas><span class="name">${small ? shortName(e.id) : racerName(e.id)}</span><span class="pts">${e.points}てん</span>`;
+    list.appendChild(row);
+    rows.push([row, e]);
+  }
+  requestAnimationFrame(() => {
+    for (const [row, e] of rows) paintRacer($('canvas', row), e.id, e.rank === 1 ? 1 : 0);
+  });
+}
+
+function showStandings() {
+  const gp = app.gp;
+  if (!gp) return go('title');
+  clearInterval(app.fireworkTimer);
+  const standings = gp.standings();
+  const roundEl = $('#standings-round');
+  if (roundEl) roundEl.textContent = `${gp.round} / ${gp.courses.length} レース`;
+  show('standings');
+  sound.playMusic('podium');
+  fillStandings($('#standings-list'), standings);
+  sound.standingsSting?.();
+  const rank = gp.playerRank();
+  setTimeout(() => {
+    if (app.screen === 'standings') voice.say(say('gpStandingsLine', `いまの そうごうは ${L.RANK_WORDS ? L.RANK_WORDS[rank] || rank + 'ばん' : rank + 'ばん'}め！`, rank), { interrupt: false });
+  }, 500);
+}
+
+function nextGpRace() {
+  const gp = app.gp;
+  if (!gp) return go('title');
+  if (gp.isFinished()) return showCup();
+  app.course = gp.nextCourse() || 'meadow';
+  voice.say(say('gpNextLine', `つぎは ${COURSE_NAME[app.course]}！`, app.course));
+  startRace();
+}
+
+function showCup() {
+  const gp = app.gp;
+  if (!gp) return go('title');
+  const standings = gp.standings();
+  const rank = gp.playerRank();
+  const champion = standings[0];
+  show('cup');
+  sound.playMusic('podium');
+  const text = $('#cup-text');
+  if (text) text.textContent = rank === 1 ? 'チャンピオン！' : `そうごう ${rank}い！`;
+  paintCanvas($('#cup-canvas'), (c, w, h) => {
+    const sz = Math.min(w, h);
+    c.translate((w - sz) / 2, (h - sz) / 2);
+    drawTrophy(c, sz);
+  });
+  if (champion) {
+    const cv = $('#cup-champ');
+    if (champion.id === 'player') paintVehicle(cv, app.vehicle, true);
+    else paintKart(cv, champion.id, 1);
+  }
+  fillStandings($('#cup-standings'), standings, true);
+  // The cup sticker: gold for the champion, silver / bronze for the next two.
+  const cupId = rank === 1 ? 'cup' : rank === 2 ? 'cup-silver' : rank === 3 ? 'cup-bronze' : null;
+  const box = $('#cup-earned');
+  if (box) {
+    box.innerHTML = '';
+    if (cupId && STICKERS.includes(cupId)) {
+      book.add([cupId]);
+      const cv = document.createElement('canvas');
+      cv.setAttribute('aria-hidden', 'true');
+      box.appendChild(cv);
+      paintCanvas(cv, (c, w) => drawSticker(c, cupId, w, true));
+    }
+  }
+  if (typeof sound.cupFanfare === 'function') sound.cupFanfare();
+  else sound.fanfare();
+  setTimeout(() => sound.crowd?.(3), 400);
+  vibrate([80, 40, 80, 40, 120]);
+  renderer.confetti(rank === 1 ? 120 : 60);
+  clearInterval(app.fireworkTimer);
+  let n = 0;
+  app.fireworkTimer = setInterval(() => {
+    renderer.firework();
+    if (n++ % 2 === 0) renderer.confetti(20);
+    if (n > (rank === 1 ? 16 : 6)) clearInterval(app.fireworkTimer);
+  }, 700);
+  const fallback = rank === 1 ? 'チャンピオン！ おめでとう！' : rank <= 3 ? `そうごう ${rank}ばん！ すごい！` : 'さんせん かんそう！ えらい！';
+  voice.say(say('gpChampionLine', fallback, rank));
+}
+
+function startGrandPrix() {
+  unlockAudio();
+  sound.pop();
+  app.mode = 'gp';
+  app.gp = createGrandPrix();
+  voice.say(say('gpStartLine', 'グランプリ スタート！ ３つの コースで しょうぶ！'));
+  go('vehicle');
+}
+
+function endGrandPrix() {
+  app.mode = 'single';
+  app.gp = null;
 }
 
 // ---------------------------------------------------------------- sticker book
@@ -550,7 +785,7 @@ function pauseRace() {
 function resumeRace() { pausePanel.hidden = true; if (!app.settingsOpen) setPaused(false); }
 $('#btn-pause').onclick = pauseRace;
 $('#race-resume').onclick = resumeRace;
-$('#race-home').onclick = () => { leaveRace(); resumeRace(); go('title'); };
+$('#race-home').onclick = () => { leaveRace(); endGrandPrix(); resumeRace(); go('title'); };
 window.addEventListener('blur', () => { clearInput(); pauseRace(); });
 let tilt = { value: 0, active: false };
 
@@ -620,14 +855,42 @@ function currentSteer() {
   return steer;
 }
 
+function pulse(el, cls) {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
 $('#btn-honk').addEventListener('click', (e) => {
   e.stopPropagation();
   if (app.race && !app.paused) app.race.honk();
-  const b = e.currentTarget;
-  b.classList.remove('toot');
-  void b.offsetWidth;
-  b.classList.add('toot');
+  pulse(e.currentTarget, 'toot');
 });
+const btnBoost = $('#btn-boost');
+btnBoost?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!app.race || app.paused || app.screen !== 'race') return;
+  const used = typeof app.race.useBoost === 'function' ? app.race.useBoost() : false;
+  if (!used) sound.pop(); // not ready yet: a little "tap" so the button still answers
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'b' && app.race && app.screen === 'race' && !app.paused) app.race.useBoost?.();
+});
+
+/** The rival closest to the player (for its engine sound). */
+function nearestRival(race) {
+  if (typeof race.nearestRival === 'function') return race.nearestRival();
+  let best = null;
+  let dist = Infinity;
+  for (const r of race.rivals) {
+    const d = Math.abs(r.z - race.player.z);
+    if (d < dist) {
+      dist = d;
+      best = r;
+    }
+  }
+  return best ? { rival: best, dist } : null;
+}
 
 // ---------------------------------------------------------------- loop
 let lastT = 0;
@@ -635,7 +898,7 @@ const fps = { frames: [], log: false };
 function frame(ts) {
   requestAnimationFrame(frame);
   if (fps.log) fps.frames.push(ts);
-  const racing = app.screen === 'race' || app.screen === 'goal';
+  const racing = ['race', 'goal', 'standings', 'cup'].includes(app.screen);
   if (!racing || !app.race) {
     lastT = 0;
     return;
@@ -654,6 +917,15 @@ function frame(ts) {
   renderer.draw(app.race, ts / 1000);
   const p = app.race.player;
   sound.engineSet(Math.min(1.5, app.race.speedPct), { boost: p.boost > 0, offroad: !!p.offroad, drift: !!p.drift });
+  if (btnBoost) btnBoost.classList.toggle('ready', app.screen === 'race' && !!app.race.boostReady);
+  // The nearest rival's engine: louder when close, panned to its side.
+  if (typeof sound.rivalEngineSet === 'function') {
+    const near = app.screen === 'race' && app.race.state === 'race' ? nearestRival(app.race) : null;
+    if (near && near.rival) {
+      const max = (app.race.preset && app.race.preset.maxSpeed) || 1;
+      sound.rivalEngineSet(clamp(1 - near.dist / 900, 0, 1), clamp((near.rival.x - p.x) / 1.5, -1, 1), clamp(near.rival.speed / max, 0, 1.5));
+    } else sound.rivalEngineSet(0, 0, 0);
+  }
 }
 requestAnimationFrame(frame);
 
@@ -714,7 +986,23 @@ document.addEventListener(
 $('#btn-start').addEventListener('click', () => {
   unlockAudio();
   sound.pop();
+  endGrandPrix();
   go('vehicle');
+});
+$('#btn-gp')?.addEventListener('click', startGrandPrix);
+$('#btn-next')?.addEventListener('click', () => {
+  sound.pop();
+  showStandings();
+});
+$('#btn-standings-next')?.addEventListener('click', () => {
+  sound.pop();
+  nextGpRace();
+});
+$('#btn-cup-home')?.addEventListener('click', () => {
+  sound.pop();
+  leaveRace();
+  endGrandPrix();
+  go('title');
 });
 $('#btn-book').addEventListener('click', () => {
   sound.pop();
@@ -739,6 +1027,7 @@ $('#btn-again').addEventListener('click', () => {
 $('#btn-other').addEventListener('click', () => {
   sound.pop();
   leaveRace();
+  endGrandPrix();
   go('vehicle');
 });
 
@@ -746,8 +1035,11 @@ function leaveRace() {
   clearTimeout(app.goalTimer);
   clearInterval(app.fireworkTimer);
   sound.engineStop();
+  sound.rivalEngineSet?.(0, 0, 0);
   sound.setTempo?.(1);
   announcer.reset();
+  hideGridIntro();
+  btnBoost?.classList.remove('ready', 'fire');
   app.race = null;
   pointers.clear();
 }
@@ -854,6 +1146,7 @@ for (const b of $$('#settings [data-rivals]')) {
 $('#btn-close').addEventListener('click', closeSettings);
 $('#btn-home').addEventListener('click', () => {
   leaveRace();
+  endGrandPrix();
   closeSettings();
   go('title');
 });

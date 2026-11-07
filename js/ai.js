@@ -19,8 +19,8 @@ import { SEGMENT_LENGTH, clamp, overlap } from './physics.js';
  */
 export const AI_LEVELS = {
   easy: { skill: [0.70, 0.82], band: 0.2, dist: 2200, hover: 600, lead: 0.02, hold: 0.16, floor: 0.66, late: 0.4, pads: false, react: [0.25, 0.7] },
-  normal: { skill: [0.84, 0.94], band: 0.14, dist: 2200, hover: 520, lead: 0.05, hold: 0.12, floor: 0.78, late: 0.5, pads: true, react: [0.15, 0.5] },
-  hard: { skill: [0.98, 1.1], band: 0.1, dist: 2600, hover: 520, lead: 0.08, hold: 0.06, floor: 0.9, late: 0.6, pads: true, react: [0.05, 0.35] },
+  normal: { skill: [0.82, 0.92], band: 0.14, dist: 2200, hover: 520, lead: 0.04, hold: 0.13, floor: 0.74, late: 0.5, pads: true, react: [0.15, 0.5] },
+  hard: { skill: [0.96, 1.06], band: 0.1, dist: 2600, hover: 520, lead: 0.07, hold: 0.07, floor: 0.86, late: 0.6, pads: true, react: [0.05, 0.35] },
 };
 export const AI_LEVEL_IDS = Object.keys(AI_LEVELS);
 
@@ -270,15 +270,26 @@ export function rankOf(playerZ, rivals) {
 
 /**
  * Finish order: everyone who finished (by time), then the rest by distance.
- * @returns {Array<{id:string, finished:boolean}>}
+ * Each entry carries `time`: the real finish time for finishers, or an estimate
+ * (now + remaining distance at the current pace) for karts still on the track.
+ * @param {{time?:number, maxSpeed?:number}} [opt] current race time and base pace for the estimate
+ * @returns {Array<{id:string, finished:boolean, time:number}>}
  */
-export function finishOrder(player, rivals, goalZ, playerFinishTime) {
-  const list = rivals.map((r) => ({ id: r.animal, finished: r.finished, t: r.finishTime, z: r.z }));
-  list.push({ id: 'player', finished: player.z >= goalZ, t: playerFinishTime, z: player.z });
+export function finishOrder(player, rivals, goalZ, playerFinishTime, opt = {}) {
+  const now = opt.time || 0;
+  const estimate = (z, speed) => now + Math.max(0, goalZ - z) / Math.max(1, speed || opt.maxSpeed || 1);
+  const list = rivals.map((r) => ({
+    id: r.animal,
+    finished: !!r.finished,
+    t: r.finished ? r.finishTime : estimate(r.z, r.speed),
+    z: r.z,
+  }));
+  const pf = player.z >= goalZ;
+  list.push({ id: 'player', finished: pf, t: pf ? playerFinishTime : estimate(player.z, player.speed), z: player.z });
   list.sort((a, b) => {
     if (a.finished && b.finished) return a.t - b.t;
     if (a.finished !== b.finished) return a.finished ? -1 : 1;
     return b.z - a.z;
   });
-  return list.map(({ id, finished }) => ({ id, finished }));
+  return list.map(({ id, finished, t }) => ({ id, finished, time: t }));
 }

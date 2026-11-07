@@ -48,6 +48,10 @@ const TRACKS = {
 function parseSeq(str) {
   return str.trim().split(/\s+/).map((t) => (t === '.' ? 0 : noteFreq(t)));
 }
+function clamp01(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+}
 for (const t of Object.values(TRACKS)) {
   t.m = parseSeq(t.melody);
   t.b = parseSeq(t.bass);
@@ -360,12 +364,105 @@ export class Sound {
   }
 
   engineStop() {
+    this.rivalEngineStop();
     if (!this.engine) return;
     const e = this.engine;
     this.engine = null;
     try {
       e.stop();
     } catch (err) {}
+  }
+
+  // ---------- nearest rival's engine (a small, panned hum that grows as it gets close) ----------
+  /**
+   * level 0..1 = how close the nearest rival is (0 = silent), pan -1..1 = left/right,
+   * pitch 0..1 = that rival's speed. Nodes are created on first use and kept; level 0 just mutes.
+   */
+  rivalEngineSet(level = 0, pan = 0, pitch = 0.5) {
+    if (!this.ok()) return;
+    const lv = clamp01(level);
+    if (!this.rivalEngine) {
+      if (lv <= 0) return; // nothing to hear yet: do not build nodes for silence
+      try {
+        this.rivalEngine = this.makeRivalEngine();
+      } catch (e) {
+        this.rivalEngine = null;
+        return;
+      }
+      if (!this.rivalEngine) return;
+    }
+    const r = this.rivalEngine;
+    const t = this.ctx.currentTime;
+    const p = clamp01(pitch);
+    try {
+      r.g.gain.setTargetAtTime(lv * 0.035, t, 0.08);
+      r.osc.frequency.setTargetAtTime(60 + p * 70, t, 0.1);
+      r.osc2.frequency.setTargetAtTime((60 + p * 70) * 2, t, 0.1);
+      r.lfo.frequency.setTargetAtTime(7 + p * 16, t, 0.1);
+      if (r.pan) r.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, Number(pan) || 0)), t, 0.08);
+    } catch (e) {
+      /* optional */
+    }
+  }
+
+  makeRivalEngine() {
+    const c = this.ctx;
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 95;
+    const osc2 = c.createOscillator();
+    osc2.type = 'square';
+    osc2.frequency.value = 190;
+    const g2 = c.createGain();
+    g2.gain.value = 0.25;
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 420;
+    const am = c.createGain();
+    am.gain.value = 1;
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 12;
+    const lg = c.createGain();
+    lg.gain.value = 0.3;
+    const g = c.createGain();
+    g.gain.value = 0;
+    lfo.connect(lg);
+    lg.connect(am.gain);
+    osc.connect(f);
+    osc2.connect(g2);
+    g2.connect(f);
+    f.connect(am);
+    am.connect(g);
+    let pan = null;
+    if (typeof c.createStereoPanner === 'function') {
+      try {
+        pan = c.createStereoPanner();
+        g.connect(pan);
+        pan.connect(this.sfx);
+      } catch (e) {
+        pan = null;
+        g.connect(this.sfx);
+      }
+    } else {
+      g.connect(this.sfx);
+    }
+    osc.start();
+    osc2.start();
+    lfo.start();
+    return { osc, osc2, lfo, g, pan };
+  }
+
+  rivalEngineStop() {
+    const r = this.rivalEngine;
+    if (!r) return;
+    this.rivalEngine = null;
+    try {
+      const t = this.ctx.currentTime;
+      r.g.gain.setTargetAtTime(0, t, 0.1);
+      r.osc.stop(t + 0.6);
+      r.osc2.stop(t + 0.6);
+      r.lfo.stop(t + 0.6);
+    } catch (e) {}
   }
 
   // ---------- race sound effects (see audio-sfx.js) ----------
@@ -392,6 +489,14 @@ export class Sound {
   }
   slipstream() {
     this.sfxCall(sfx.slipstream);
+  }
+  /** Grand Prix champion fanfare (long). */
+  cupFanfare() {
+    this.sfxCall(sfx.cupFanfare);
+  }
+  /** Short sting for the standings board. */
+  standingsSting() {
+    this.sfxCall(sfx.standingsSting);
   }
   sfxCall(fn, ...args) {
     if (typeof fn !== 'function' || !this.ok()) return;

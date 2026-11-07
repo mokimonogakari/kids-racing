@@ -5,8 +5,15 @@ import {
   SEGMENT_LENGTH, SPEED_PRESETS, makePlayer, stepPlayer, overlap, bounce, startBoost, progress, PLAYER_W,
 } from './physics.js';
 import { AI_LEVELS, makeRival, stepRival, separateRivals, rankOf, finishOrder, playerGridPos, RIVAL_W } from './ai.js';
+import { vehiclePreset } from './vehicle-stats.js';
 
 export const COUNTDOWN = 3;
+/** Stars needed to charge the boost button, and how long a charged boost waits before firing itself. */
+export const BOOST_STARS = 5;
+export const BOOST_AUTO_SECS = 6;
+export const BOOST_SECS = 2.4;
+/** A rival must get this far past the player (or fall this far behind) before the rank changes. */
+export const RANK_MARGIN = 60;
 
 export class Race {
   /**
@@ -15,7 +22,8 @@ export class Race {
   constructor(o) {
     this.courseId = o.course;
     this.vehicle = o.vehicle;
-    this.preset = SPEED_PRESETS[o.speed] || SPEED_PRESETS.slow;
+    this.preset = SPEED_PRESETS[o.speed] || SPEED_PRESETS.slow; // base pace (rivals measure against this)
+    this.playerPreset = vehiclePreset(this.preset, o.vehicle); // the chosen vehicle's own feel
     this.level = AI_LEVELS[o.rivals] || AI_LEVELS.normal;
     this.levelId = AI_LEVELS[o.rivals] ? o.rivals : 'normal';
     this.course = generateCourse(o.course, { length: o.length || 1000, seed: o.seed });
@@ -31,6 +39,9 @@ export class Race {
     this.time = 0;
     this.stateTime = 0;
     this.stars = 0;
+    this.boostCharge = 0; // stars collected toward the next boost (0..BOOST_STARS)
+    this.boostReady = false;
+    this.boostReadyAt = 0;
     this.fruits = {};
     this.eventSeen = null;
     this.jump = 0;
@@ -40,7 +51,8 @@ export class Race {
     this.cowBumpAt = -9;
     this.finishTime = 0;
     this.finishExact = 0;
-    this.rank = rankOf(this.player.z, this.rivals);
+    for (const r of this.rivals) r.ahead = r.z > this.player.z;
+    this.rank = this.rankFromFlags();
     this.bestRank = this.rank;
     this.finalRank = 0;
     this.overtakes = 0;
@@ -51,7 +63,6 @@ export class Race {
     this.slipAt = -9;
     this.stableRank = 0; // last rank announced as "stable"
     this.rankSince = 0; // time at which the current rank was reached
-    for (const r of this.rivals) r.ahead = r.z > this.player.z;
   }
 
   emit(name, ...args) {
@@ -70,7 +81,42 @@ export class Race {
   }
 
   get speedPct() {
-    return this.player.speed / this.preset.maxSpeed;
+    return this.player.speed / this.playerPreset.maxSpeed;
+  }
+
+  /** Rank from the hysteresis flags: 1 + rivals currently counted as ahead. */
+  rankFromFlags() {
+    let n = 1;
+    for (const r of this.rivals) if (r.ahead) n++;
+    return n;
+  }
+
+  /** The closest rival (by distance along the track), or null. */
+  nearestRival() {
+    let best = null;
+    let dist = Infinity;
+    for (const r of this.rivals) {
+      const d = Math.abs(r.z - this.player.z);
+      if (d < dist) {
+        dist = d;
+        best = r;
+      }
+    }
+    return best ? { rival: best, dist } : null;
+  }
+
+  /**
+   * Fire the charged boost (the big yellow button). Returns true when a boost was used.
+   * @param {boolean} auto true when the race fires it by itself after BOOST_AUTO_SECS.
+   */
+  useBoost(auto = false) {
+    if (!this.boostReady || this.state !== 'race') return false;
+    this.boostReady = false;
+    this.boostCharge = 0;
+    this.boostReadyAt = 0;
+    startBoost(this.player, BOOST_SECS);
+    this.emit('boostUsed', auto);
+    return true;
   }
 
   /** Speed in "km/h" for the gauge (purely cosmetic). */
@@ -116,7 +162,7 @@ export class Race {
     const finished = this.state === 'goal';
     const seg = this.course.segments[this.segIndex(p.z)];
     const z0 = p.z;
-    const fenced = stepPlayer(p, finished ? { steer: 0 } : input, dt, { preset: this.preset, curve: seg.curve, finished });
+    const fenced = stepPlayer(p, finished ? { steer: 0 } : input, dt, { preset: this.playerPreset, curve: seg.curve, finished });
     if (fenced && !finished && this.time - (this.fenceAt || -9) > 1.2) {
       this.fenceAt = this.time;
       this.emit('fence');
@@ -165,23 +211,26 @@ export class Race {
 
     // Slipstream: tuck in right behind a rival for a moment and get a little pull.
     if (!finished) this.checkSlipstream(dt);
+    // A charged boost that nobody pressed fires by itself after a while (small hands, no reading needed).
+    if (!finished && this.boostReady && this.time - this.boostReadyAt >= BOOST_AUTO_SECS) this.useBoost(true);
 
     // Positions: who is ahead of whom.
     if (!finished) {
       const prev = this.rank;
-      this.rank = rankOf(p.z, this.rivals);
+      // Hysteresis: a kart has to be clearly past (RANK_MARGIN) before places swap,
+      // so side-by-side duels do not flicker the badge or the voice.
       for (const r of this.rivals) {
-        const ahead = r.z > p.z;
-        if (ahead !== r.ahead) {
-          r.ahead = ahead;
-          if (ahead) this.emit('overtaken', r.animal);
-          else {
-            this.overtakes++;
-            r.cheer = Math.max(r.cheer, 1.0);
-            this.emit('overtake', r.animal);
-          }
+        if (!r.ahead && r.z > p.z + RANK_MARGIN) {
+          r.ahead = true;
+          this.emit('overtaken', r.animal);
+        } else if (r.ahead && r.z < p.z - RANK_MARGIN) {
+          r.ahead = false;
+          this.overtakes++;
+          r.cheer = Math.max(r.cheer, 1.0);
+          this.emit('overtake', r.animal);
         }
       }
+      this.rank = this.rankFromFlags();
       if (this.rank !== prev) {
         this.bestRank = Math.min(this.bestRank, this.rank);
         this.rankSince = this.time;
@@ -257,9 +306,13 @@ export class Race {
           it.taken = true;
           if (it.kind === 'star') {
             this.stars++;
-            if (this.stars % 5 === 0) {
-              startBoost(p, 2.2);
-              this.emit('starReward', this.stars);
+            if (!this.boostReady) {
+              this.boostCharge = Math.min(BOOST_STARS, this.boostCharge + 1);
+              if (this.boostCharge >= BOOST_STARS) {
+                this.boostReady = true;
+                this.boostReadyAt = this.time;
+                this.emit('boostReady');
+              }
             }
           }
           else this.fruits[it.id] = (this.fruits[it.id] || 0) + 1;
@@ -307,7 +360,10 @@ export class Race {
 
   /** Everyone's order right now (finished first, then by distance). */
   get order() {
-    return finishOrder(this.player, this.rivals, this.course.goalZ, this.finishExact ?? this.finishTime);
+    return finishOrder(this.player, this.rivals, this.course.goalZ, this.finishExact ?? this.finishTime, {
+      time: this.time,
+      maxSpeed: this.preset.maxSpeed,
+    });
   }
 
   result() {

@@ -133,6 +133,44 @@ export function finishJingle(sound, rank = 1) {
   }
 }
 
+/** Grand Prix champion: a long, grand fanfare with a drum roll and a big final chord (~3.2 s). */
+export function cupFanfare(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound, 0.02);
+  // drum roll under the opening
+  for (let i = 0; i < 14; i++) sound.noise(t + i * 0.06, 0.05, { freq: 1600, q: 0.7, gain: 0.05 + i * 0.006, attack: 0.004 });
+  // two rising calls
+  const calls = [
+    [['C5', 0.0, 0.16], ['E5', 0.17, 0.16], ['G5', 0.34, 0.16], ['C6', 0.51, 0.45]],
+    [['D5', 1.05, 0.16], ['F5', 1.22, 0.16], ['A5', 1.39, 0.16], ['D6', 1.56, 0.45]],
+  ];
+  for (const seq of calls) {
+    for (const [n, dt, d] of seq) {
+      const f = noteFreq(n);
+      sound.tone(f, t + dt, d, { type: 'square', gain: 0.1, lp: 3200, attack: 0.01 });
+      sound.tone(f / 2, t + dt, d, { type: 'triangle', gain: 0.13 });
+    }
+  }
+  // climb to the final chord
+  ['E6', 'G6', 'C7'].forEach((n, i) => sound.tone(noteFreq(n), t + 2.1 + i * 0.1, 0.22, { type: 'square', gain: 0.07, lp: 4000 }));
+  const chordAt = t + 2.45;
+  for (const n of ['C5', 'E5', 'G5', 'C6', 'E6']) sound.tone(noteFreq(n), chordAt, 1.6, { type: 'triangle', gain: 0.1, attack: 0.02, release: 0.7, vib: [5, 4] });
+  sound.tone(noteFreq('C3'), chordAt, 1.6, { type: 'triangle', gain: 0.16, attack: 0.02, release: 0.7 });
+  sound.tone(noteFreq('C7'), chordAt + 0.15, 0.7, { type: 'sine', gain: 0.05, release: 0.4 });
+  sound.noise(chordAt, 0.5, { filter: 'highpass', freq: 6000, gain: 0.05, attack: 0.01 });
+}
+
+/** Standings board: a short bright sting (~0.7 s). */
+export function standingsSting(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound, 0.01);
+  sound.tone(noteFreq('G5'), t, 0.12, { type: 'square', gain: 0.09, lp: 3000, attack: 0.01 });
+  sound.tone(noteFreq('C6'), t + 0.13, 0.12, { type: 'square', gain: 0.09, lp: 3000, attack: 0.01 });
+  for (const n of ['E5', 'G5', 'C6', 'E6']) sound.tone(noteFreq(n), t + 0.27, 0.45, { type: 'triangle', gain: 0.08, attack: 0.01, release: 0.2 });
+  sound.tone(noteFreq('C4'), t + 0.27, 0.45, { type: 'triangle', gain: 0.1, release: 0.2 });
+  sound.noise(t + 0.27, 0.08, { filter: 'highpass', freq: 7000, gain: 0.06, attack: 0.004 });
+}
+
 /** Tucked in behind another kart: a soft rush of air. */
 export function slipstream(sound) {
   if (!sound.ok()) return;

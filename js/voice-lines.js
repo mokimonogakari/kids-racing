@@ -93,6 +93,67 @@ export function levelLine(level) {
   return 'ふつうの きょうそう';
 }
 
+// ---------------------------------------------------------------- ブースト・グリッド
+/** 星が5こたまって、きいろいブーストボタンが光ったとき。 */
+export function boostReadyLine() {
+  return 'ほしが たまった！ きいろい ボタンを おして！';
+}
+
+/** ブーストを使ったとき（じどう発動でも同じ）。 */
+export function boostUsedLine() {
+  return 'びゅーん！';
+}
+
+/** スタートグリッドにみんなが並んだとき。 */
+export function gridIntroLine() {
+  return 'みんな ならんだよ！';
+}
+
+// ---------------------------------------------------------------- グランプリ
+export const COURSE_NAMES = { meadow: 'はらっぱ', sea: 'うみ', snow: 'ゆきやま' };
+
+export function courseName(courseId) {
+  return COURSE_NAMES[courseId] || 'つぎの コース';
+}
+
+/** グランプリ（3戦）の開始。 */
+export function gpStartLine() {
+  return 'グランプリ スタート！ ３つの コースで しょうぶ！';
+}
+
+/** つぎのレースへ。 */
+export function gpNextLine(courseId) {
+  return `つぎは ${courseName(courseId)}！`;
+}
+
+/** 途中の総合順位。 */
+export function gpStandingsLine(rank) {
+  return `いまの そうごうは ${rankWord(rank)}め！`;
+}
+
+/** 3戦が終わったときの総合結果。何位でもほめる。 */
+export function gpChampionLine(rank) {
+  const r = clampRank(rank);
+  if (r === 1) return 'チャンピオン！ おめでとう！';
+  if (r <= 3) return `そうごう ${rankWord(r)}！ すごい！`;
+  return 'さんせん かんそう！ えらい！';
+}
+
+// ---------------------------------------------------------------- のりものの せいのう
+const VEHICLE_STAT_LINES = {
+  car: 'あかい くるまは なんでも じょうず',
+  fire: 'しょうぼうしゃは まがるのが じょうず。 ちょっと ゆっくり',
+  bus: 'バスは ゆっくりだけど いちばん よく まがる',
+  police: 'パトカーは いちばん はやい！',
+  ambulance: 'きゅうきゅうしゃは かそくが とくい',
+  dino: 'きょうりゅうカーは かそくが いちばん はやい。 でも ちょっと すべる',
+};
+
+/** のりものを選んだときの、性能のひとこと。 */
+export function vehicleStatLine(id) {
+  return VEHICLE_STAT_LINES[id] || VEHICLE_STAT_LINES.car;
+}
+
 export const RANK_SETTLE_MS = 700;
 export const OVERTAKE_GAP_MS = 2500;
 export const OVERTAKEN_GAP_MS = 4000;

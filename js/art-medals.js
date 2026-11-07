@@ -62,7 +62,15 @@ const METALS = {
 const BLUE = { a: '#4aa8ff', b: '#2f7fe0', c: '#8fd0ff', ink: '#1f4f8f' };
 
 export function medalBg(id) {
-  return { gold: '#fff1b8', silver: '#eef2f7', bronze: '#ffe3cf', ribbon: '#dceeff' }[id] || '#fff';
+  return {
+    gold: '#fff1b8', silver: '#eef2f7', bronze: '#ffe3cf', ribbon: '#dceeff',
+    cup: '#fff6c4', 'cup-silver': '#f1f4f8', 'cup-bronze': '#ffe9d8',
+  }[id] || '#fff';
+}
+
+/** Metal for a Grand Prix cup sticker id ('cup' = gold, 'cup-silver', 'cup-bronze'). */
+export function cupMetal(id) {
+  return id === 'cup-silver' ? 'silver' : id === 'cup-bronze' ? 'bronze' : 'gold';
 }
 
 export function metalFor(rank) {
@@ -186,12 +194,23 @@ function ribbonSprite(c) {
   rosette(c, 50, 52, 38, true);
 }
 
+/** Grand Prix cup sticker: the trophy in a 100x120 box (same drawing as drawTrophy). */
+function cupSprite(c, metal) {
+  c.save();
+  c.translate(0, 8);
+  drawCup(c, 100, metal);
+  c.restore();
+}
+
 /** Sticker sprites (same shape as art.js SCENERY entries). Box 100x120. */
 export const MEDAL_SPRITES = {
   gold: { box: [100, 120], world: 0.6, draw: (c) => medalSprite(c, 'gold') },
   silver: { box: [100, 120], world: 0.6, draw: (c) => medalSprite(c, 'silver') },
   bronze: { box: [100, 120], world: 0.6, draw: (c) => medalSprite(c, 'bronze') },
   ribbon: { box: [100, 120], world: 0.6, draw: (c) => ribbonSprite(c) },
+  cup: { box: [100, 120], world: 0.6, draw: (c) => cupSprite(c, 'gold') },
+  'cup-silver': { box: [100, 120], world: 0.6, draw: (c) => cupSprite(c, 'silver') },
+  'cup-bronze': { box: [100, 120], world: 0.6, draw: (c) => cupSprite(c, 'bronze') },
 };
 
 /** Sun rays behind a winner's medal. */
@@ -262,7 +281,12 @@ export function drawMedal(c, rank, size) {
 
 /** A golden cup, size x size. */
 export function drawTrophy(c, size) {
-  const m = METALS.gold;
+  drawCup(c, size, 'gold');
+}
+
+/** The cup in any metal ('gold' | 'silver' | 'bronze'), size x size. */
+export function drawCup(c, size, metal = 'gold') {
+  const m = METALS[metal] || METALS.gold;
   c.save();
   const k = size / 100;
   c.scale(k, k);
