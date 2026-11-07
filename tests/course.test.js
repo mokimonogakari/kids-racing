@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateCourse, COURSE_IDS, COURSES } from '../js/course.js';
+import { generateCourse, COURSE_IDS, COURSES, START_LINE } from '../js/course.js';
 import { SEGMENT_LENGTH } from '../js/physics.js';
 
 test('every course generates with a goal and run-out after it', () => {
@@ -49,9 +49,51 @@ test('stars, fruits, boost pads and rivals are placed on the road', () => {
       if (it.kind === 'fruit') assert.ok(COURSES.snow.fruits.includes(it.id));
     }
     for (const o of s.obstacles) assert.ok(Math.abs(o.x) < 1);
-    for (const d of s.deco) if (!['startgate', 'goalgate'].includes(d.id) && !d.event) assert.ok(Math.abs(d.x) >= 2, 'scenery stays off the road');
+    for (const d of s.deco) {
+      if (['startgate', 'goalgate'].includes(d.id) || d.event) continue;
+      if (d.id === 'cone') assert.ok(Math.abs(d.x) > 1.3 && Math.abs(d.x) < 1.6, 'cones sit on the kerb, not on the lanes');
+      else assert.ok(Math.abs(d.x) >= 2, `scenery stays off the road (${d.id} at ${d.x})`);
+    }
   }
-  for (const r of c.rivals) assert.ok(r.z < c.goalZ && r.speedFactor < 0.6);
+});
+
+test('rivals start together on the grid behind the start line', () => {
+  const seen = new Set();
+  for (const seed of [11, 12, 13]) {
+    const c = generateCourse('meadow', { length: 1000, seed });
+    assert.equal(c.rivals.length, 5);
+    for (const r of c.rivals) {
+      assert.ok([800, 1100, 1400].includes(r.z), `grid row z=${r.z}`);
+      assert.ok(Math.abs(r.x) === 0.5, `grid column x=${r.x}`);
+      assert.ok(r.z < START_LINE * SEGMENT_LENGTH, 'behind the start line');
+      assert.equal('speedFactor' in r, false, 'rivals no longer wait ahead with a slow speed factor');
+      assert.equal(typeof r.animal, 'string');
+    }
+    assert.equal(new Set(c.rivals.map((r) => r.animal)).size, 5, 'five different animals');
+    assert.equal(new Set(c.rivals.map((r) => `${r.z}/${r.x}`)).size, 5, 'one kart per slot');
+    assert.ok(!c.rivals.some((r) => r.z === 1100 && r.x === 0.5), 'the middle-right slot is the player');
+    seen.add(c.rivals.map((r) => r.animal).join(','));
+  }
+  assert.ok(seen.size > 1, 'grid order is shuffled between seeds');
+});
+
+test('track dressing: curve boards, grandstands and cones are placed', () => {
+  const c = generateCourse('meadow', { length: 1000, seed: 11 });
+  assert.ok(c.counts.sign >= 1, 'at least one curve warning board');
+  assert.ok(Array.isArray(c.curves) && c.curves.length >= 1);
+  const ids = new Set();
+  for (const s of c.segments) for (const d of s.deco) ids.add(d.id);
+  assert.ok(ids.has('signL') || ids.has('signR'), 'chevron boards exist');
+  assert.ok(ids.has('grandstand'), 'grandstands exist');
+  assert.ok(ids.has('cone'), 'cones exist');
+  // boards sit on the outside of the bend, before it starts
+  for (const cv of c.curves) {
+    const s = c.segments[Math.max(0, cv.index - 4)];
+    const board = s.deco.find((d) => d.id === 'signL' || d.id === 'signR');
+    if (!board) continue;
+    assert.equal(board.id, cv.dir > 0 ? 'signR' : 'signL');
+    assert.equal(Math.sign(board.x), -cv.dir, 'board on the outside of the curve');
+  }
 });
 
 test('event spot is clear of obstacles and short courses still work', () => {

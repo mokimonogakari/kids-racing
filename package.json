@@ -1,8 +1,8 @@
 {
   "name": "buubuu-race",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "ぶーぶーレース — a gentle racing game for small children (static site, no build step)",
+  "description": "ぶーぶーレース グランプリ — a real-competition racing game for small children (static site, no build step)",
   "type": "module",
   "scripts": {
     "test": "node --test",

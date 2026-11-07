@@ -1,4 +1,7 @@
 // All sound is synthesised with WebAudio: no audio files.
+import { Engine } from './audio-engine.js';
+import * as sfx from './audio-sfx.js';
+
 const NOTE_INDEX = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
 export function noteFreq(name) {
   const m = /^([A-G][#b]?)(-?\d)$/.exec(name);
@@ -33,6 +36,13 @@ const TRACKS = {
     bass: 'D3 . A2 . D3 . A2 . G2 . D3 . A2 . E3 . G2 . D3 . F#2 . B2 . A2 . E3 . D3 . A2 .',
     drums: 'jjk.jjs.jjk.jjs.',
   },
+  // 表彰台: a bright little victory march for the goal screen.
+  podium: {
+    bpm: 112, lead: 'triangle', leadGain: 0.55,
+    melody: 'C5 E5 G5 C6 . G5 E5 G5 A5 . A5 C6 B5 G5 E5 . F5 A5 C6 A5 G5 . E5 G5 D5 F5 G5 B5 C6 . . .',
+    bass: 'C3 . G2 . C3 . G2 . F2 . C3 . F2 . C3 . F2 . C3 . G2 . D3 . G2 . G2 . C3 . C3 .',
+    drums: 'k.hks.h.k.hks.hh',
+  },
 };
 
 function parseSeq(str) {
@@ -55,6 +65,7 @@ export class Sound {
     this.engine = null;
     this.chimeStep = 0;
     this.lastChime = 0;
+    this.tempo = 1; // BGM tempo multiplier (1 = as written)
   }
 
   /** Must be called from a user gesture (pointerup/touchend/click). */
@@ -327,41 +338,25 @@ export class Sound {
     this.tone(500, t, 0.12, { slide: 1000, gain: 0.25 });
   }
 
-  // ---------- engine hum ----------
+  // ---------- engine (3 gears, exhaust, wind: see audio-engine.js) ----------
   engineStart() {
     if (!this.ok() || this.engine) return;
-    const c = this.ctx;
-    const osc = c.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = 55;
-    const f = c.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = 340;
-    const g = c.createGain();
-    g.gain.value = 0;
-    const am = c.createGain();
-    am.gain.value = 1;
-    const lfo = c.createOscillator();
-    lfo.frequency.value = 10;
-    const lg = c.createGain();
-    lg.gain.value = 0.35;
-    lfo.connect(lg);
-    lg.connect(am.gain);
-    osc.connect(f);
-    f.connect(am);
-    am.connect(g);
-    g.connect(this.sfx);
-    osc.start();
-    lfo.start();
-    g.gain.setTargetAtTime(0.07, c.currentTime, 0.3);
-    this.engine = { osc, g, lfo };
+    try {
+      this.engine = new Engine(this);
+      this.engine.start();
+    } catch (e) {
+      this.engine = null;
+    }
   }
 
-  engineSet(pct) {
+  /** pct = speed / top speed (may exceed 1 while boosting). opts: { boost, offroad, drift }. */
+  engineSet(pct, opts = {}) {
     if (!this.engine) return;
-    const t = this.ctx.currentTime;
-    this.engine.osc.frequency.setTargetAtTime(52 + pct * 60, t, 0.1);
-    this.engine.lfo.frequency.setTargetAtTime(8 + pct * 12, t, 0.1);
+    try {
+      this.engine.set(pct, opts);
+    } catch (e) {
+      /* engine is optional */
+    }
   }
 
   engineStop() {
@@ -369,11 +364,48 @@ export class Sound {
     const e = this.engine;
     this.engine = null;
     try {
-      const t = this.ctx.currentTime;
-      e.g.gain.setTargetAtTime(0, t, 0.15);
-      e.osc.stop(t + 0.8);
-      e.lfo.stop(t + 0.8);
+      e.stop();
     } catch (err) {}
+  }
+
+  // ---------- race sound effects (see audio-sfx.js) ----------
+  skid() {
+    this.sfxCall(sfx.skid);
+  }
+  curb() {
+    this.sfxCall(sfx.curbTick);
+  }
+  passBy(dir = 1) {
+    this.sfxCall(sfx.passBy, dir);
+  }
+  rev() {
+    this.sfxCall(sfx.rev);
+  }
+  crowd(secs = 2.5) {
+    this.sfxCall(sfx.crowd, secs);
+  }
+  bumpCar() {
+    this.sfxCall(sfx.bumpCar);
+  }
+  finishJingle(rank = 1) {
+    this.sfxCall(sfx.finishJingle, rank);
+  }
+  slipstream() {
+    this.sfxCall(sfx.slipstream);
+  }
+  sfxCall(fn, ...args) {
+    if (typeof fn !== 'function' || !this.ok()) return;
+    try {
+      fn(this, ...args);
+    } catch (e) {
+      /* effects are optional */
+    }
+  }
+
+  /** BGM tempo multiplier (1 = normal, e.g. 1.12 for the final stretch). */
+  setTempo(mult = 1) {
+    const m = Number(mult);
+    this.tempo = Number.isFinite(m) && m > 0 ? m : 1;
   }
 
   // ---------- music ----------
@@ -398,7 +430,7 @@ export class Sound {
   schedule() {
     const tr = this.track;
     if (!tr || !this.ctx || this.ctx.state !== 'running') return;
-    const stepDur = 60 / tr.bpm / 2;
+    const stepDur = 60 / (tr.bpm * (this.tempo || 1)) / 2;
     if (this.nextTime < this.ctx.currentTime - 0.5) this.nextTime = this.ctx.currentTime + 0.05;
     while (this.nextTime < this.ctx.currentTime + 0.2) {
       const i = this.step % tr.m.length;

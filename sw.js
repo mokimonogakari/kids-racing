@@ -1,23 +1,31 @@
 // Service worker: caches the app shell so the game works offline.
 // HTML/JS/CSS use network-first (fresh when online), icons cache-first.
-const VERSION = 'buubuu-v3-voice';
+const VERSION = 'buubuu-v4-gp';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './css/style.css',
   './js/main.js',
+  './js/ai.js',
   './js/art.js',
+  './js/art-track.js',
+  './js/art-medals.js',
   './js/audio.js',
+  './js/audio-engine.js',
+  './js/audio-sfx.js',
   './js/course.js',
   './js/physics.js',
   './js/race.js',
+  './js/records.js',
   './js/render.js',
+  './js/render-hud.js',
   './js/rng.js',
   './js/settings.js',
   './js/stickers.js',
   './js/storage.js',
   './js/voice.js',
+  './js/voice-lines.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -1,24 +1,31 @@
 // Race session: rules and state (no drawing, no DOM).
 import { generateCourse } from './course.js';
+import { makeRng } from './rng.js';
 import {
   SEGMENT_LENGTH, SPEED_PRESETS, makePlayer, stepPlayer, overlap, bounce, startBoost, progress, PLAYER_W,
 } from './physics.js';
+import { AI_LEVELS, makeRival, stepRival, separateRivals, rankOf, finishOrder, playerGridPos, RIVAL_W } from './ai.js';
 
 export const COUNTDOWN = 3;
 
 export class Race {
   /**
-   * @param {{course:string, vehicle:string, speed?:'slow'|'normal', length?:number, seed?:number, hooks?:object}} o
+   * @param {{course:string, vehicle:string, speed?:'slow'|'normal', rivals?:'easy'|'normal'|'hard', length?:number, seed?:number, hooks?:object}} o
    */
   constructor(o) {
     this.courseId = o.course;
     this.vehicle = o.vehicle;
     this.preset = SPEED_PRESETS[o.speed] || SPEED_PRESETS.slow;
+    this.level = AI_LEVELS[o.rivals] || AI_LEVELS.normal;
+    this.levelId = AI_LEVELS[o.rivals] ? o.rivals : 'normal';
     this.course = generateCourse(o.course, { length: o.length || 1000, seed: o.seed });
     this.hooks = o.hooks || {};
+    this.rng = makeRng((o.seed ?? 7) * 31 + 11);
     this.player = makePlayer();
-    this.player.z = 2 * SEGMENT_LENGTH;
-    this.rivals = this.course.rivals.map((r) => ({ ...r }));
+    const grid = playerGridPos();
+    this.player.z = grid.z;
+    this.player.x = grid.x;
+    this.rivals = this.course.rivals.map((r) => makeRival(r.animal, r, this.level, this.rng));
     this.events = this.course.events.map((e) => ({ ...e, t: 0 }));
     this.state = 'countdown';
     this.time = 0;
@@ -28,10 +35,23 @@ export class Race {
     this.eventSeen = null;
     this.jump = 0;
     this.lastCount = COUNTDOWN + 1;
-    this.milestones = { 0.3: false, 0.62: false, 0.88: false };
+    this.milestones = { 0.3: false, 0.5: false, 0.62: false, 0.88: false };
     this.cowX = -2.6;
     this.cowBumpAt = -9;
     this.finishTime = 0;
+    this.finishExact = 0;
+    this.rank = rankOf(this.player.z, this.rivals);
+    this.bestRank = this.rank;
+    this.finalRank = 0;
+    this.overtakes = 0;
+    this.lastStretch = false;
+    this.curbAt = -9;
+    this.driftAt = -9;
+    this.rivalBumpAt = -9;
+    this.slipAt = -9;
+    this.stableRank = 0; // last rank announced as "stable"
+    this.rankSince = 0; // time at which the current rank was reached
+    for (const r of this.rivals) r.ahead = r.z > this.player.z;
   }
 
   emit(name, ...args) {
@@ -51,6 +71,11 @@ export class Race {
 
   get speedPct() {
     return this.player.speed / this.preset.maxSpeed;
+  }
+
+  /** Speed in "km/h" for the gauge (purely cosmetic). */
+  get kmh() {
+    return Math.round(this.speedPct * 120);
   }
 
   honk() {
@@ -81,6 +106,7 @@ export class Race {
       if (this.stateTime >= COUNTDOWN) {
         this.state = 'race';
         this.stateTime = 0;
+        this.rankSince = this.time;
         this.emit('go');
       }
       return;
@@ -95,22 +121,76 @@ export class Race {
       this.fenceAt = this.time;
       this.emit('fence');
     }
+    if (p.curb && this.time - this.curbAt > 0.22) {
+      this.curbAt = this.time;
+      this.emit('curb');
+    }
+    if (p.drift && this.time - this.driftAt > 1.6) {
+      this.driftAt = this.time;
+      this.emit('drift');
+    }
 
-    // Rivals drive along happily.
+    // Rivals race for real.
+    const ctx = {
+      segments: this.course.segments,
+      goalZ: this.course.goalZ,
+      player: p,
+      rivals: this.rivals,
+      preset: this.preset,
+      level: this.level,
+      time: this.time,
+      rng: this.rng,
+      racing: true,
+    };
     for (const r of this.rivals) {
-      // Friends wait at their spot and start driving when the player comes close,
-      // so the player always gets to see (and pass) every one of them.
-      if (r.z - p.z < 7000 || r.passed) r.z += this.preset.maxSpeed * r.speedFactor * dt;
-      if (!finished && !r.passed && p.z > r.z + 120) {
-        r.passed = true;
-        r.cheer = 2.2;
-        this.emit('pass', r.animal);
+      const wasFinished = r.finished;
+      stepRival(r, ctx, dt);
+      if (!wasFinished && r.finished) {
+        // Sub-frame crossing time, so two karts finishing in the same frame keep their real order.
+        r.finishTime = this.time - Math.max(0, r.z - this.course.goalZ) / Math.max(1, r.speed);
+        this.emit('rivalFinish', r.animal, this.order.findIndex((e) => e.id === r.animal) + 1);
       }
-      if (!finished && Math.abs(r.z - (p.z + 60)) < 180 && overlap(p.x, PLAYER_W, r.x, 0.6, 0.95)) {
-        r.hop = 0.5;
-        r.z += 200;
-        bounce(p, r.x, 0.75);
-        this.emit('bump', 'rival');
+      // Bumping into each other: soft, playful, never a stop.
+      if (!finished && Math.abs(r.z - p.z) < 170 && overlap(p.x, PLAYER_W, r.x, RIVAL_W, 0.92) && this.time - this.rivalBumpAt > 0.9) {
+        this.rivalBumpAt = this.time;
+        const dir = bounce(p, r.x, 0.86);
+        r.vx = -dir * 1.9;
+        r.speed *= 0.9;
+        r.hop = 0.4;
+        r.bump = 0.5;
+        this.emit('bump', 'rival', r.animal);
+      }
+    }
+    separateRivals(this.rivals);
+
+    // Slipstream: tuck in right behind a rival for a moment and get a little pull.
+    if (!finished) this.checkSlipstream(dt);
+
+    // Positions: who is ahead of whom.
+    if (!finished) {
+      const prev = this.rank;
+      this.rank = rankOf(p.z, this.rivals);
+      for (const r of this.rivals) {
+        const ahead = r.z > p.z;
+        if (ahead !== r.ahead) {
+          r.ahead = ahead;
+          if (ahead) this.emit('overtaken', r.animal);
+          else {
+            this.overtakes++;
+            r.cheer = Math.max(r.cheer, 1.0);
+            this.emit('overtake', r.animal);
+          }
+        }
+      }
+      if (this.rank !== prev) {
+        this.bestRank = Math.min(this.bestRank, this.rank);
+        this.rankSince = this.time;
+        this.emit('rank', this.rank, prev);
+      }
+      // A rank that held for a while is worth announcing (brief swaps are not).
+      if (this.rank !== this.stableRank && this.time - this.rankSince >= 0.6) {
+        this.stableRank = this.rank;
+        this.emit('rankStable', this.rank);
       }
     }
 
@@ -122,15 +202,46 @@ export class Race {
       for (const k of Object.keys(this.milestones)) {
         if (!this.milestones[k] && pr >= Number(k)) {
           this.milestones[k] = true;
-          this.emit('milestone', Number(k));
+          this.emit('milestone', Number(k), this.rank);
         }
+      }
+      if (!this.lastStretch && pr >= 0.86) {
+        this.lastStretch = true;
+        this.emit('lastStretch', this.rank);
       }
       if (p.z >= this.course.goalZ) {
         this.state = 'goal';
         this.stateTime = 0;
         this.finishTime = this.time;
+        this.finishExact = this.time - Math.max(0, p.z - this.course.goalZ) / Math.max(1, p.speed);
+        // Final place comes from the finish order, so it always matches result().positions.
+        this.finalRank = this.order.findIndex((e) => e.id === 'player') + 1 || rankOf(p.z, this.rivals);
+        this.rank = this.finalRank;
         this.emit('goal', this.result());
       }
+    }
+  }
+
+  /** Sitting in a rival's slipstream (60..380 behind, same lane) for 0.8 s gives a short pull. */
+  checkSlipstream(dt) {
+    const p = this.player;
+    let tucked = false;
+    for (const r of this.rivals) {
+      const dz = r.z - p.z;
+      if (dz >= 60 && dz <= 380 && overlap(p.x, PLAYER_W, r.x, RIVAL_W, 1.0)) {
+        tucked = true;
+        break;
+      }
+    }
+    if (!tucked) {
+      p.slipT = 0;
+      return;
+    }
+    p.slipT += dt;
+    if (p.slipT >= 0.8 && p.slip <= 0 && this.time - this.slipAt > 3) {
+      this.slipAt = this.time;
+      p.slip = 1.2;
+      this.emit('slipstream');
     }
   }
 
@@ -194,14 +305,28 @@ export class Race {
     }
   }
 
+  /** Everyone's order right now (finished first, then by distance). */
+  get order() {
+    return finishOrder(this.player, this.rivals, this.course.goalZ, this.finishExact ?? this.finishTime);
+  }
+
   result() {
+    const raceTime = Math.max(0, this.finishTime - COUNTDOWN);
+    const order = this.order;
     return {
+      positions: order.map((e, i) => ({ id: e.id, rank: i + 1 })),
       vehicle: this.vehicle,
       course: this.courseId,
       stars: this.stars,
       fruits: { ...this.fruits },
       event: this.eventSeen || this.course.def.event,
       time: this.time,
+      raceTime,
+      rank: this.finalRank || this.rank,
+      racers: this.rivals.length + 1,
+      overtakes: this.overtakes,
+      level: this.levelId,
+      order,
     };
   }
 }

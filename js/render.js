@@ -2,6 +2,7 @@
 import { SEGMENT_LENGTH, clamp } from './physics.js';
 import { SPRITES, spriteImage, rrect } from './art.js';
 import { START_LINE } from './course.js';
+import { drawRankBadge, drawSpeedo, drawPositionBar, drawFlash, drawStartLights } from './render-hud.js';
 
 const ROAD_W = 1000;
 const CAM_H = 900;
@@ -10,6 +11,9 @@ const PLAYER_DZ = CAM_H * DEPTH;
 const DRAW = 130;
 const CURVE_K = 0.55;
 const FOLLOW = 0.65;
+const RIVAL_BEHIND = 450; // rivals this far behind the player are still drawn (big, at the bottom)
+const SHAKE_T = 0.35;
+const OVER = 90; // extra pixels painted beyond the canvas so the camera lean never shows gaps
 
 const PALETTES = {
   meadow: {
@@ -39,6 +43,7 @@ const PALETTES = {
   },
 };
 const BOOST_COLS = ['#ff7eb6', '#ffd23f', '#5ce1e6'];
+const RAINBOW = ['#ff5a6e', '#ffd23f', '#5cc75c', '#4aa8ff', '#a77bff'];
 
 export class Renderer {
   constructor(canvas) {
@@ -53,6 +58,14 @@ export class Renderer {
     this.bgOffset = 0;
     this.bgCourse = null;
     this.flakes = [];
+    // camera / HUD feedback state
+    this.shakeT = 0;
+    this.lean = 0;
+    this.rankPulse = 0;
+    this.flashInfo = null;
+    this._t = 0;
+    this._race = null;
+    this._lastRank = 0;
   }
 
   resize(safe) {
@@ -75,6 +88,17 @@ export class Renderer {
     this.carW = portrait ? Math.min(this.SX * 0.8, H * 0.2) : Math.min(this.SX * 0.8, H * 0.34);
     this.bgCourse = null; // rebuild background at new size
   }
+
+  /** Camera shake (bumps, curbs). k scales the strength; decays by itself. */
+  shake(k = 1) {
+    this.shakeT = Math.max(this.shakeT || 0, SHAKE_T * k);
+  }
+
+  /** Big pop-up word in the middle of the screen (e.g. "ぬいた！"). */
+  flash(text) {
+    this.flashInfo = { text, t0: this._t || 0 };
+  }
+
 
   // ---------- background ----------
   buildBackground(courseId) {
@@ -168,7 +192,7 @@ export class Renderer {
     const dh = dw * (def.box[1] / def.box[0]);
     const dx = x - dw / 2;
     const dy = y - dh - lift;
-    if (dx > this.W || dx + dw < 0 || dy > this.H) return;
+    if (dx > this.W + OVER || dx + dw < -OVER || dy > this.H + OVER) return;
     const devW = dw * this.dpr;
     const bucket = devW < 56 ? 64 : devW < 120 ? 128 : devW < 240 ? 256 : devW < 600 ? 512 : 1024;
     const img = spriteImage(id, Math.round((bucket * Math.max(def.box[0], def.box[1])) / def.box[0]), frame);
@@ -212,6 +236,20 @@ export class Renderer {
   draw(race, t) {
     const c = this.c;
     const { W, H } = this;
+    const dt = this.dt || 1 / 60;
+    this._t = t;
+    if (this._race !== race) {
+      // a new race: reset per-race feedback state
+      this._race = race;
+      this._lastRank = race.rank;
+      this.rankPulse = 0;
+      this.flashInfo = null;
+      this.lean = 0;
+      this.shakeT = 0;
+    } else if (race.rank !== this._lastRank) {
+      this._lastRank = race.rank;
+      this.rankPulse = 1;
+    }
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.bgCourse !== race.courseId) this.buildBackground(race.courseId);
     const pal = PALETTES[race.courseId];
@@ -230,18 +268,33 @@ export class Renderer {
     const camXRoad = p.x * FOLLOW;
     const camX = camXRoad * ROAD_W;
 
+    // camera feel: lean into curves, shake on bumps. The world only; the HUD stays level.
+    const targetLean = race.state === 'race' ? clamp(pSeg.curve * race.speedPct * 0.012, -0.035, 0.035) : 0;
+    this.lean += (targetLean - this.lean) * Math.min(1, dt * 6);
+    if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);
+    const sh = this.shakeT / SHAKE_T;
+    c.save();
+    if (sh > 0) c.translate((Math.random() - 0.5) * 8 * sh, (Math.random() - 0.5) * 6 * sh);
+    if (Math.abs(this.lean) > 0.0005) {
+      c.translate(W / 2, H);
+      c.rotate(this.lean);
+      c.scale(1.02, 1.02);
+      c.translate(-W / 2, -H);
+    }
+
     // sky + parallax
     this.bgOffset += pSeg.curve * race.speedPct * 0.0025 * (race.state === 'race' ? 1 : 0);
     c.fillStyle = this.skyGrad;
-    c.fillRect(0, 0, W, this.HZ + 2);
+    c.fillRect(-OVER, -OVER, W + OVER * 2, this.HZ + 2 + OVER);
     this.drawSun(race.courseId, t);
     const lw = this.bgLW;
     let off = ((this.bgOffset * lw) % lw + lw) % lw;
     const by = this.HZ - this.bgLH + 2 + clamp(-playerY * 0.02, -10, 10);
     c.drawImage(this.bgLayer, -off, by, lw, this.bgLH);
-    if (lw - off < W) c.drawImage(this.bgLayer, lw - off, by, lw, this.bgLH);
+    if (off < OVER) c.drawImage(this.bgLayer, -off - lw, by, lw, this.bgLH);
+    if (lw - off < W + OVER) c.drawImage(this.bgLayer, lw - off, by, lw, this.bgLH);
     c.fillStyle = pal.grass[0];
-    c.fillRect(0, this.HZ, W, H - this.HZ);
+    c.fillRect(-OVER, this.HZ, W + OVER * 2, H - this.HZ + OVER);
 
     // project & draw road from near to far
     let maxy = H;
@@ -263,6 +316,7 @@ export class Renderer {
       x += dx;
       dx += s.curve * CURVE_K;
       s.clip = maxy;
+      s.frame = n; // projected this frame (used for rivals behind the player)
       if (s.p1.cz <= DEPTH || s.p2.y >= s.p1.y || s.p2.y >= maxy) continue;
       this.drawSegment(s, pal, race.courseId);
       maxy = s.p2.y;
@@ -272,11 +326,17 @@ export class Renderer {
     // sprites from far to near
     const jump = race.jump > 0 ? Math.abs(Math.sin(race.jump * Math.PI * 3)) * 0.35 * (race.jump / 0.9) : 0;
     const rivalsBySeg = new Map();
+    const behind = [];
     for (const r of race.rivals) {
-      if (r.z < p.z + 700) continue; // next to / just ahead of / behind the player: would fill the screen near the camera
+      if (r.z < p.z - RIVAL_BEHIND) continue; // too far back to see
+      if (r.z < p.z) {
+        behind.push(r); // right behind us: drawn over the player, big
+        continue;
+      }
       const ri = Math.floor(r.z / SEGMENT_LENGTH);
       if (ri >= baseI && ri < baseI + DRAW) rivalsBySeg.set(ri, (rivalsBySeg.get(ri) || []).concat(r));
     }
+    const nearGoal = this.goalIndex * SEGMENT_LENGTH - p.z < 6000;
     for (let k = drawn.length - 1; k >= 0; k--) {
       const s = drawn[k];
       const r = s.p1.r;
@@ -301,12 +361,19 @@ export class Renderer {
           } else if (id === 'snowmanBig') {
             frame = ev && ev.fired && ev.t < 6 ? Math.floor(ev.t * 2) % 2 : 0;
           }
+        } else if (def.frames === 2) {
+          // crowds and flag marshals wave all race long
+          frame = Math.floor((t + (d.t || 0)) * 3) % 2;
         } else if (def.animal) {
           lift = jump * r * this.SX + (id === 'rabbit' ? Math.max(0, Math.sin(t * 3 + d.t)) * 0.12 * r * this.SX : 0);
         } else if (id === 'balloons') {
           lift = Math.sin(t * 2 + d.t) * 0.05 * r * this.SX;
         }
         this.sprite(id, frame, sx + r * xx * this.SX, sy, r, def.world, lift, clip);
+      }
+      if (s.index === this.goalIndex && SPRITES.flagman) {
+        // the marshal waves the chequered flag as the leaders come in
+        this.sprite('flagman', nearGoal ? Math.floor(t * 4) % 2 : 0, sx + r * -2.15 * this.SX, sy, r, SPRITES.flagman.world, 0, clip);
       }
       for (const ob of s.obstacles) {
         const hop = (ob.hop > 0 ? Math.sin((1 - ob.hop / 0.6) * Math.PI) * 0.35 : 0) + jump * 0.6;
@@ -320,22 +387,59 @@ export class Renderer {
       }
       const rv = rivalsBySeg.get(s.index);
       if (rv) {
-        for (const ri of rv) {
-          const cheer = ri.cheer > 0 || race.jump > 0;
-          const hop = (ri.hop > 0 ? Math.sin((1 - ri.hop / 0.5) * Math.PI) * 0.4 : 0) + (cheer ? Math.abs(Math.sin(t * 8)) * 0.12 : 0);
-          // interpolate within the segment for smoothness
-          const f = (ri.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
-          const rx = s.p1.x + (s.p2.x - s.p1.x) * f;
-          const ry = s.p1.y + (s.p2.y - s.p1.y) * f;
-          const rr = s.p1.r + (s.p2.r - s.p1.r) * f;
-          this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, rx + rr * ri.x * this.SX, ry, rr, 0.75, hop * rr * this.SX, clip);
-        }
+        // farther first inside the segment, so nearer karts overlap them
+        if (rv.length > 1) rv.sort((a, b) => b.z - a.z);
+        for (const ri of rv) this.drawRival(ri, s, race, t);
       }
     }
 
     this.drawPlayer(race, t, camXRoad);
+    // rivals right behind the player appear larger and lower, over the player's car
+    if (behind.length) {
+      behind.sort((a, b) => b.z - a.z);
+      for (const ri of behind) {
+        const si = Math.floor(ri.z / SEGMENT_LENGTH);
+        const s = segs[si];
+        if (!s || !s.p1 || !s.p2 || s.frame === undefined || si < baseI || si >= baseI + DRAW) continue;
+        this.drawRival(ri, s, race, t);
+      }
+    }
     this.drawParticles(race, t);
+    this.drawSpeedLines(race, t);
+    c.restore();
+
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawHud(race, t);
+  }
+
+  /** One rival kart, interpolated inside its segment (works ahead of and behind the player). */
+  drawRival(ri, s, race, t) {
+    const cheer = ri.cheer > 0 || race.jump > 0;
+    const wobble = ri.speed > 0 && !ri.finished ? Math.abs(Math.sin(t * 11 + ri.z * 0.013)) * 0.015 : 0;
+    const hop = (ri.hop > 0 ? Math.sin((1 - ri.hop / 0.5) * Math.PI) * 0.4 : 0) + (cheer ? Math.abs(Math.sin(t * 8)) * 0.12 : 0) + wobble;
+    const f = (ri.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
+    const rx = s.p1.x + (s.p2.x - s.p1.x) * f;
+    const ry = s.p1.y + (s.p2.y - s.p1.y) * f;
+    const rr = s.p1.r + (s.p2.r - s.p1.r) * f;
+    const x = rx + rr * ri.x * this.SX;
+    const rot = ri.bump > 0 ? Math.sin(ri.bump * 40) * 0.1 : 0;
+    const clip = s.clip || 0;
+    if (ri.boost > 0) {
+      // short rainbow wake under the kart
+      const c = this.c;
+      const dw = 0.75 * rr * this.SX;
+      const tw = dw * 0.7;
+      const h = Math.min(dw * 0.45, (clip || this.H) - ry);
+      if (h > 1) {
+        c.globalAlpha = 0.65;
+        for (let i = 0; i < RAINBOW.length; i++) {
+          c.fillStyle = RAINBOW[i];
+          c.fillRect(x - tw / 2 + (i * tw) / RAINBOW.length, ry - dw * 0.02, tw / RAINBOW.length + 1, h);
+        }
+        c.globalAlpha = 1;
+      }
+    }
+    this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, x, ry, rr, 0.75, hop * rr * this.SX, clip, rot);
   }
 
   drawSun(courseId, t) {
@@ -386,11 +490,11 @@ export class Renderer {
     const p2 = s.p2;
     const alt = Math.floor(s.index / 3) % 2;
     c.fillStyle = pal.grass[alt];
-    c.fillRect(0, p2.y, W, p1.y - p2.y + 1);
+    c.fillRect(-OVER, p2.y, W + OVER * 2, p1.y - p2.y + 1);
     if (courseId === 'sea') {
       const e1 = p1.x + p1.w * 1.7;
       const e2 = p2.x + p2.w * 1.7;
-      this.poly(e1, p1.y + 1, W + 2, p1.y + 1, W + 2, p2.y, e2, p2.y, pal.water[alt]);
+      this.poly(e1, p1.y + 1, W + OVER, p1.y + 1, W + OVER, p2.y, e2, p2.y, pal.water[alt]);
       if (alt) this.poly(e1, p1.y + 1, e1 + p1.w * 0.12, p1.y + 1, e2 + p2.w * 0.12, p2.y, e2, p2.y, '#ffffff');
     }
     const rw1 = p1.w * 1.14;
@@ -411,7 +515,6 @@ export class Renderer {
       const m1 = p1.x + b.x * p1.w;
       const m2 = p2.x + b.x * p2.w;
       const aw1 = Math.min(b.w, 0.7) * 0.35 * p1.w;
-      const aw2 = Math.min(b.w, 0.7) * 0.35 * p2.w;
       const ym = (p1.y + p2.y) / 2;
       c.fillStyle = 'rgba(255,255,255,0.9)';
       c.beginPath();
@@ -423,7 +526,6 @@ export class Renderer {
       c.lineTo(m1 - aw1 * 0.5, p1.y);
       c.closePath();
       c.fill();
-      void aw2;
     } else if (s.index === START_LINE || s.index === this.goalIndex) {
       this.checker(p1, p2);
     } else if (alt) {
@@ -469,18 +571,19 @@ export class Renderer {
       rot = Math.sin(k * Math.PI * 4) * 0.12 * k;
     } else if (race.state !== 'countdown') {
       lift = Math.abs(Math.sin(t * 9)) * w * 0.012 * Math.min(1, race.speedPct) + (p.offroad ? Math.abs(Math.sin(t * 22)) * w * 0.02 : 0);
+      if (p.curb) lift += Math.abs(Math.sin(t * 40)) * w * 0.015;
     }
-    rot += (this.steer || 0) * 0.06;
+    const steer = typeof p.steer === 'number' ? p.steer : this.steer || 0;
+    rot += steer * (p.drift ? 0.11 : 0.06);
     if (race.state === 'goal') lift = Math.abs(Math.sin(race.stateTime * 5)) * w * 0.12;
     // boost rainbow trail
     if (p.boost > 0) {
-      const cols = ['#ff5a6e', '#ffd23f', '#5cc75c', '#4aa8ff', '#a77bff'];
       const tw = w * 0.85;
-      for (let i = 0; i < cols.length; i++) {
-        c.fillStyle = cols[i];
+      for (let i = 0; i < RAINBOW.length; i++) {
+        c.fillStyle = RAINBOW[i];
         c.globalAlpha = 0.75;
-        const bx = x - tw / 2 + (i * tw) / cols.length;
-        c.fillRect(bx, y - w * 0.05, tw / cols.length + 1, this.H - y + w * 0.05);
+        const bx = x - tw / 2 + (i * tw) / RAINBOW.length;
+        c.fillRect(bx, y - w * 0.05, tw / RAINBOW.length + 1, this.H - y + w * 0.05 + OVER);
       }
       c.globalAlpha = 1;
     }
@@ -495,6 +598,42 @@ export class Renderer {
       const dust = race.courseId === 'snow' ? '#ffffff' : race.courseId === 'sea' ? '#ffe9b0' : '#c9f0a8';
       this.addParticle(x + (Math.random() - 0.5) * w * 0.8, y - 4, (Math.random() - 0.5) * 40, -40 - Math.random() * 40, dust, 6 + Math.random() * 5, 0.6, 'dot');
     }
+    // tyre smoke when drifting through a bend
+    if (p.drift && race.state === 'race') {
+      for (const side of [-1, 1]) {
+        if (Math.random() < 0.7) {
+          this.addParticle(
+            x + side * w * 0.34 + (Math.random() - 0.5) * 8, y - 2,
+            side * (10 + Math.random() * 25) - steer * 30, -15 - Math.random() * 25,
+            'rgba(255,255,255,0.85)', 7 + Math.random() * 8, 0.45 + Math.random() * 0.25, 'dot', -30,
+          );
+        }
+      }
+    }
+  }
+
+  /** Thin anime-style speed lines rushing in from the edges while boosting. */
+  drawSpeedLines(race, t) {
+    const p = race.player;
+    if (!(p.boost > 0) || race.state !== 'race') return;
+    const c = this.c;
+    const { W, H } = this;
+    c.save();
+    c.strokeStyle = 'rgba(255,255,255,0.6)';
+    c.lineCap = 'round';
+    for (let i = 0; i < 8; i++) {
+      const side = i % 2 ? 1 : -1;
+      const y = H * (0.06 + (((i * 0.137) + t * 0.9) % 1) * 0.86);
+      const len = W * (0.1 + Math.random() * 0.14);
+      const x0 = side < 0 ? 0 : W;
+      const ang = Math.atan2(this.HZ - y, W / 2 - x0);
+      c.lineWidth = 1.5 + Math.random() * 2;
+      c.beginPath();
+      c.moveTo(x0, y);
+      c.lineTo(x0 + Math.cos(ang) * len, y + Math.sin(ang) * len);
+      c.stroke();
+    }
+    c.restore();
   }
 
   bubble(x, y, text, t) {
@@ -650,6 +789,9 @@ export class Renderer {
       c.fillStyle = g;
       c.fill();
     }
+    const hv = this;
+    // everyone else on the track, as little dots
+    drawPositionBar(hv, race, t, x0, x1, y);
     // flag at the end
     this.flag(x1 + 12, y + 4, 26, t);
     // the player's vehicle on the track
@@ -679,6 +821,9 @@ export class Renderer {
     });
     if (this.hudPulse) for (const k in this.hudPulse) this.hudPulse[k] = Math.max(0, this.hudPulse[k] - (this.dt || 0.016) * 3);
 
+    // current position: big badge in the middle
+    drawRankBadge(hv, race, t);
+
     // flying collected items
     const dt = this.dt || 1 / 60;
     for (let i = this.flyers.length - 1; i >= 0; i--) {
@@ -698,9 +843,9 @@ export class Renderer {
       this.sprite(f.id, 0, fx, fy + size / 2, 1, 0, 0, 0, 0, size);
     }
 
-    // countdown traffic light
-    if (race.state === 'countdown') this.trafficLight(race.stateTime, t);
-    else if (race.state === 'race' && race.stateTime < 0.8) this.trafficLight(3 + race.stateTime, t);
+    // start lights
+    if (race.state === 'countdown') drawStartLights(hv, race.stateTime, t);
+    else if (race.state === 'race' && race.stateTime < 0.8) drawStartLights(hv, 3 + race.stateTime, t);
 
     // steering hint hands for the first seconds
     if (race.state === 'countdown' || (race.state === 'race' && race.stateTime < 5)) {
@@ -712,6 +857,10 @@ export class Renderer {
       this.arrow(this.W - this.safe.right - 56 + wob, this.H - this.safe.bottom - 135, 1);
       c.globalAlpha = 1;
     }
+
+    // speedometer and pop-up words on top of everything
+    drawSpeedo(hv, race, t);
+    drawFlash(hv, t);
   }
 
   arrow(x, y, dir) {
@@ -758,37 +907,5 @@ export class Renderer {
       }
     }
     c.strokeRect(x - s * 0.5, y - s, s, cell * 3);
-  }
-
-  trafficLight(st, t) {
-    const c = this.c;
-    const r = Math.min(this.W, this.H) * 0.075;
-    const w = r * 7.4;
-    const h = r * 2.8;
-    const x = this.W / 2 - w / 2;
-    const y = this.HZ - h * 1.4;
-    const fade = st > 3 ? Math.max(0, 1 - (st - 3) / 0.8) : 1;
-    c.globalAlpha = fade;
-    rrect(c, x, y, w, h, h / 2);
-    c.fillStyle = '#4a4458';
-    c.fill();
-    c.lineWidth = 4;
-    c.strokeStyle = '#ffffff';
-    c.stroke();
-    const on = Math.floor(st); // lamps light up one per second, then all turn green
-    for (let i = 0; i < 3; i++) {
-      const lit = st >= 3 || i <= on;
-      c.beginPath();
-      c.arc(x + h / 2 + i * (w - h) / 2, y + h / 2, r, 0, Math.PI * 2);
-      c.fillStyle = lit ? (st >= 3 ? '#5cdb6a' : '#ff5a5a') : '#2d2836';
-      c.fill();
-      if (lit) {
-        c.beginPath();
-        c.arc(x + h / 2 + i * (w - h) / 2 - r * 0.3, y + h / 2 - r * 0.3, r * 0.25, 0, Math.PI * 2);
-        c.fillStyle = 'rgba(255,255,255,0.7)';
-        c.fill();
-      }
-    }
-    c.globalAlpha = 1;
   }
 }

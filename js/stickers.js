@@ -3,8 +3,12 @@ import { readJSON, writeJSON } from './storage.js';
 
 export const VEHICLE_IDS = ['car', 'fire', 'bus', 'police', 'ambulance', 'dino'];
 
+/** Medal stickers for the finishing position: 1st, 2nd, 3rd, and the finisher's ribbon. */
+export const MEDAL_STICKERS = ['gold', 'silver', 'bronze', 'ribbon'];
+
 export const STICKERS = [
   'star',
+  ...MEDAL_STICKERS,
   'apple', 'strawberry', 'watermelon', 'pineapple', 'mikan', 'grape',
   'cow', 'whale', 'snowman',
   ...VEHICLE_IDS.map((v) => 'v-' + v),
@@ -12,13 +16,25 @@ export const STICKERS = [
 
 export const STICKER_KEY = 'buubuu-race.stickers.v1';
 
+/** Medal sticker id for a finishing rank (1 = gold, 2 = silver, 3 = bronze, else ribbon). */
+export function medalForRank(rank) {
+  if (!Number.isFinite(rank)) return null;
+  if (rank <= 1) return 'gold';
+  if (rank === 2) return 'silver';
+  if (rank === 3) return 'bronze';
+  return 'ribbon';
+}
+
 /**
  * Stickers earned by a finished race. Always at least the vehicle medal and
- * the course friend, so a race can never give "nothing".
- * @param {{vehicle:string, course:string, stars:number, fruits:Object<string,number>, event?:string}} r
+ * the course friend, so a race can never give "nothing". With a finishing
+ * rank, the medal (or finisher's ribbon) comes first.
+ * @param {{vehicle:string, course:string, stars:number, fruits:Object<string,number>, event?:string, rank?:number}} r
  */
 export function stickersForRace(r) {
   const out = [];
+  const medal = medalForRank(r.rank);
+  if (medal) out.push(medal);
   if (r.stars > 0) out.push('star');
   for (const [id, n] of Object.entries(r.fruits || {})) if (n > 0 && STICKERS.includes(id)) out.push(id);
   const friend = r.event || { meadow: 'cow', sea: 'whale', snow: 'snowman' }[r.course];

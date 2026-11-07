@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStickerBook, stickersForRace, STICKERS, STICKER_KEY } from '../js/stickers.js';
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../js/settings.js';
+import { createStickerBook, stickersForRace, medalForRank, STICKERS, MEDAL_STICKERS, STICKER_KEY } from '../js/stickers.js';
+import { loadSettings, saveSettings, sanitizeSettings, DEFAULT_SETTINGS } from '../js/settings.js';
 
 function memoryStorage(initial = {}) {
   const m = new Map(Object.entries(initial));
@@ -27,6 +27,24 @@ test('a race always earns stickers', () => {
   const more = stickersForRace({ vehicle: 'dino', course: 'meadow', stars: 3, fruits: { apple: 2, strawberry: 0, bogus: 3 }, event: 'cow' });
   assert.deepEqual(more, ['star', 'apple', 'cow', 'v-dino']);
   for (const id of more) assert.ok(STICKERS.includes(id));
+});
+
+test('a finishing rank adds the medal (or the finisher ribbon) first', () => {
+  const base = { vehicle: 'car', course: 'snow', stars: 2, fruits: { mikan: 1 } };
+  assert.deepEqual(stickersForRace({ ...base, rank: 1 }), ['gold', 'star', 'mikan', 'snowman', 'v-car']);
+  assert.deepEqual(stickersForRace({ ...base, rank: 2 }), ['silver', 'star', 'mikan', 'snowman', 'v-car']);
+  assert.deepEqual(stickersForRace({ ...base, rank: 3 }), ['bronze', 'star', 'mikan', 'snowman', 'v-car']);
+  for (const rank of [4, 5, 6]) assert.equal(stickersForRace({ ...base, rank })[0], 'ribbon');
+  // no rank (old results) and junk ranks behave like before
+  assert.deepEqual(stickersForRace({ vehicle: 'bus', course: 'sea', stars: 0, fruits: {} }), ['whale', 'v-bus']);
+  assert.deepEqual(stickersForRace({ vehicle: 'bus', course: 'sea', stars: 0, fruits: {}, rank: 'x' }), ['whale', 'v-bus']);
+  assert.deepEqual(stickersForRace({ vehicle: 'bus', course: 'sea', stars: 0, fruits: {}, rank: NaN }), ['whale', 'v-bus']);
+  assert.deepEqual(MEDAL_STICKERS, ['gold', 'silver', 'bronze', 'ribbon']);
+  for (const id of MEDAL_STICKERS) assert.ok(STICKERS.includes(id), `${id} is a known sticker`);
+  assert.equal(STICKERS.indexOf('gold'), STICKERS.indexOf('star') + 1, 'medals sit right after the star');
+  assert.equal(medalForRank(1), 'gold');
+  assert.equal(medalForRank(6), 'ribbon');
+  assert.equal(medalForRank(undefined), null);
 });
 
 test('sticker book persists across reloads', () => {
@@ -76,4 +94,17 @@ test('settings load defaults, persist, and sanitise', () => {
   assert.equal(saveSettings(throwingStorage, s), false);
   const bad = memoryStorage({ 'buubuu-race.settings.v1': JSON.stringify({ speed: 'turbo', sound: 'yes' }) });
   assert.deepEqual(loadSettings(bad), { ...DEFAULT_SETTINGS });
+});
+
+test('rival level (きょうそう) defaults to normal and only accepts easy/normal/hard', () => {
+  assert.equal(DEFAULT_SETTINGS.rivals, 'normal');
+  assert.equal(sanitizeSettings({ rivals: 'turbo' }).rivals, 'normal');
+  assert.equal(sanitizeSettings({ rivals: 'hard' }).rivals, 'hard');
+  assert.equal(sanitizeSettings({ rivals: 'easy' }).rivals, 'easy');
+  assert.equal(sanitizeSettings({ rivals: 7 }).rivals, 'normal');
+  const st = memoryStorage();
+  saveSettings(st, { ...DEFAULT_SETTINGS, rivals: 'hard' });
+  assert.equal(loadSettings(st).rivals, 'hard');
+  const old = memoryStorage({ 'buubuu-race.settings.v1': JSON.stringify({ sound: false, speed: 'normal' }) });
+  assert.equal(loadSettings(old).rivals, 'normal', 'settings saved before the update still load');
 });

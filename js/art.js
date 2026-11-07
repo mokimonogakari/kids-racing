@@ -1,5 +1,7 @@
 // All pictures are drawn here with Canvas 2D (no image files).
 // Every drawing works in its own small "box" coordinate space.
+import { TRACK_SPRITES } from './art-track.js';
+import { MEDAL_SPRITES, medalBg } from './art-medals.js';
 
 export const OUT = '#3d2c3e';
 const TAU = Math.PI * 2;
@@ -506,19 +508,39 @@ export function drawVehicleRear(c, id, f = 0) {
 
 // ---------- animal friends (rivals) ----------
 const ANIMALS = {
-  bear: { fur: '#c08a55', kart: '#4aa8ff' },
-  rabbit: { fur: '#ffffff', kart: '#ff7eb6' },
-  frog: { fur: '#7ed957', kart: '#ffd23f' },
-  pig: { fur: '#ffb8cb', kart: '#5cd6a0' },
-  cat: { fur: '#ffb347', kart: '#a77bff' },
+  bear: { fur: '#c08a55', kart: '#4aa8ff', number: 1, helmet: '#ff5a6e' },
+  rabbit: { fur: '#ffffff', kart: '#ff7eb6', number: 2, helmet: '#4aa8ff' },
+  frog: { fur: '#7ed957', kart: '#ffd23f', number: 3, helmet: '#ff9f1c' },
+  pig: { fur: '#ffb8cb', kart: '#5cd6a0', number: 4, helmet: '#a77bff' },
+  cat: { fur: '#ffb347', kart: '#a77bff', number: 5, helmet: '#5cc75c' },
 };
 export const ANIMAL_IDS = Object.keys(ANIMALS);
+/** Colours of the rival racers: { bear: { fur, kart, number, helmet }, ... } (used by the HUD). */
+export const ANIMAL_COLORS = ANIMALS;
 
-/** Animal in a little kart, looking back and smiling. Box 100x110. frame 1 = cheering. */
+/** Racing number roundel (white circle with a bold number). */
+function roundel(c, x, y, r, n) {
+  circ(c, x, y, r);
+  fs(c, '#fff', 2.2);
+  c.save();
+  c.font = `900 ${Math.round(r * 1.45)}px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", system-ui, sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillStyle = OUT;
+  c.fillText(String(n), x, y + r * 0.08);
+  c.restore();
+}
+
+/** Animal in a little racing kart, looking back and smiling. Box 100x110. frame 1 = cheering. */
 export function drawAnimalKart(c, animal, frame = 0) {
   const a = ANIMALS[animal] || ANIMALS.bear;
   const cheer = frame === 1;
-  shadow(c, 50, 104, 46, 6);
+  shadow(c, 50, 105, 48, 6);
+  // rear wing (behind everything)
+  rrect(c, 10, 56, 80, 9, 3);
+  fs(c, a.helmet, 2.5);
+  line(c, [24, 65, 24, 70], 3);
+  line(c, [76, 65, 76, 70], 3);
   // arms
   if (cheer) {
     line(c, [30, 64, 16, 34], 7, OUT);
@@ -574,6 +596,34 @@ export function drawAnimalKart(c, animal, frame = 0) {
     c.fillStyle = '#efd0a8';
     c.fill();
   }
+  // racing goggles pushed up on the forehead (the frog's eyes sit there, so it gets a headband instead)
+  if (animal === 'frog') {
+    c.save();
+    c.beginPath();
+    c.arc(hx, hy, 24, 0, TAU);
+    c.clip();
+    rrect(c, hx - 26, hy - 10, 52, 6.5, 3);
+    fs(c, a.helmet, 2);
+    c.restore();
+    star(c, hx, hy - 6.8, 3.2, 0.5);
+    c.fillStyle = '#fff';
+    c.fill();
+  } else {
+    c.save();
+    c.beginPath();
+    c.arc(hx, hy, 24, 0, TAU);
+    c.clip();
+    rrect(c, hx - 26, hy - 15, 52, 6, 3);
+    fs(c, a.helmet, 2);
+    c.restore();
+    for (const s of [-1, 1]) {
+      circ(c, hx + s * 8.5, hy - 13, 5.8);
+      fs(c, '#bfe9ff', 2.2);
+      circ(c, hx + s * 8.5 - 1.5, hy - 14.5, 1.8);
+      c.fillStyle = 'rgba(255,255,255,0.85)';
+      c.fill();
+    }
+  }
   // face
   if (animal === 'frog') {
     eye(c, hx - 12, hy - 18, 6.5);
@@ -613,23 +663,27 @@ export function drawAnimalKart(c, animal, frame = 0) {
   } else {
     smile(c, hx, hy + 6, animal === 'frog' ? 20 : 12, cheer || animal === 'frog', 2);
   }
-  // kart
-  rrect(c, 2, 70, 22, 30, 8);
+  // kart: bigger slick tyres, body, tail lights, racing number
+  rrect(c, 0, 68, 25, 34, 9);
   fs(c, '#3a3440');
-  rrect(c, 76, 70, 22, 30, 8);
+  rrect(c, 75, 68, 25, 34, 9);
   fs(c, '#3a3440');
+  for (const x of [12.5, 87.5]) {
+    rrect(c, x - 7, 74, 14, 5, 2.5);
+    c.fillStyle = '#5a5464';
+    c.fill();
+  }
   rrect(c, 14, 62, 72, 32, 13);
   fs(c, a.kart);
   shine(c, 22, 66, 22, 4);
-  rrect(c, 20, 78, 12, 7, 3.5);
+  rrect(c, 19, 76, 12, 7, 3.5);
   fs(c, '#ff4747', 2);
-  rrect(c, 68, 78, 12, 7, 3.5);
+  rrect(c, 69, 76, 12, 7, 3.5);
   fs(c, '#ff4747', 2);
-  circ(c, 50, 80, 7);
-  fs(c, '#fff', 2);
-  star(c, 50, 80, 4.5, 0.5);
-  c.fillStyle = '#ffcc33';
-  c.fill();
+  roundel(c, 50, 79, 8.5, a.number);
+  // bumper
+  rrect(c, 18, 90, 64, 7, 3.5);
+  fs(c, '#e4e4ee', 2.2);
 }
 
 // ---------- items ----------
@@ -1589,6 +1643,8 @@ for (const a of ANIMAL_IDS) {
   SCENERY['kart-' + a] = { box: [100, 110], world: 0.72, draw: (c) => drawAnimalKart(c, a, 0) };
   SCENERY['kart-' + a + '-cheer'] = { box: [100, 110], world: 0.72, draw: (c) => drawAnimalKart(c, a, 1) };
 }
+// Track dressing (signs, grandstands, cones...) and medals live in their own modules.
+Object.assign(SCENERY, TRACK_SPRITES, MEDAL_SPRITES);
 
 export const SPRITES = SCENERY;
 
@@ -1630,7 +1686,7 @@ export function drawSticker(c, id, size, owned = true) {
   c.fillStyle = owned ? stickerBg(id) : '#ddd6e6';
   c.fill();
   const spriteId = id.startsWith('v-') ? 'front-' + id.slice(2) : id === 'snowman' ? 'snowmanBig' : id;
-  const def = SCENERY[spriteId];
+  const def = MEDAL_SPRITES[id] || SCENERY[spriteId];
   if (def) {
     const [bw, bh] = def.box;
     const k = (r * 1.25) / Math.max(bw, bh);
@@ -1653,7 +1709,15 @@ export function drawSticker(c, id, size, owned = true) {
 
 function stickerBg(id) {
   if (id.startsWith('v-')) return '#fff1b8';
-  return { star: '#fff6c9', cow: '#d8f5c4', whale: '#cdeeff', snowman: '#e3efff', apple: '#ffe1e1', strawberry: '#ffe1ea', watermelon: '#e2f7da', pineapple: '#fff3c4', mikan: '#ffe9cc', grape: '#efe0ff' }[id] || '#fff';
+  if (MEDAL_SPRITES[id]) {
+    try {
+      const bg = medalBg(id);
+      if (bg) return bg;
+    } catch (e) {
+      /* fall through to the table below */
+    }
+  }
+  return { star: '#fff6c9', cow: '#d8f5c4', whale: '#cdeeff', snowman: '#e3efff', apple: '#ffe1e1', strawberry: '#ffe1ea', watermelon: '#e2f7da', pineapple: '#fff3c4', mikan: '#ffe9cc', grape: '#efe0ff', gold: '#fff1b8', silver: '#eef2f7', bronze: '#ffe3cf', ribbon: '#dceeff' }[id] || '#fff';
 }
 
 /** Draws a tile scene for the course select screen. */

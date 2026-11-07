@@ -1,33 +1,76 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- ぶーぶーレース グランプリ: あかいくるま + チェッカーフラッグ + きんメダル (original artwork) -->
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#6fcbff"/>
       <stop offset="1" stop-color="#d9f5ff"/>
     </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe066"/>
+      <stop offset="1" stop-color="#f5b800"/>
+    </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#sky)"/>
-  <path d="M0 380 Q128 330 256 360 T512 350 V512 H0Z" fill="#8ee06a"/>
-  <path d="M206 360 L306 360 L420 512 L92 512Z" fill="#a3a7b8"/>
-  <circle cx="420" cy="96" r="44" fill="#ffe066"/>
-  <g transform="translate(96 120) scale(3.2)" stroke="#3d2c3e" stroke-width="3" stroke-linejoin="round">
-    <ellipse cx="50" cy="95" rx="46" ry="5" fill="#3d2c3e" opacity=".18" stroke="none"/>
-    <rect x="11" y="72" width="21" height="24" rx="7" fill="#3a3440"/>
-    <rect x="68" y="72" width="21" height="24" rx="7" fill="#3a3440"/>
-    <rect x="18" y="14" width="64" height="42" rx="17" fill="#ff5252"/>
-    <rect x="25" y="20" width="50" height="24" rx="9" fill="#bfe9ff"/>
-    <path d="M32 40 L42 24" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-    <rect x="4" y="46" width="92" height="40" rx="16" fill="#ff5252"/>
-    <rect x="14" y="49" width="30" height="5" rx="2.5" fill="#fff" opacity=".55" stroke="none"/>
-    <circle cx="27" cy="62" r="11.5" fill="#fff" stroke-width="2.6"/>
-    <circle cx="73" cy="62" r="11.5" fill="#fff" stroke-width="2.6"/>
-    <circle cx="27" cy="63.5" r="6.6" fill="#2b1f33" stroke="none"/>
-    <circle cx="73" cy="63.5" r="6.6" fill="#2b1f33" stroke="none"/>
-    <circle cx="25" cy="60.5" r="2.5" fill="#fff" stroke="none"/>
-    <circle cx="71" cy="60.5" r="2.5" fill="#fff" stroke="none"/>
-    <ellipse cx="12" cy="72" rx="5" ry="3.5" fill="#ff6e96" opacity=".55" stroke="none"/>
-    <ellipse cx="88" cy="72" rx="5" ry="3.5" fill="#ff6e96" opacity=".55" stroke="none"/>
-    <path d="M40 72 Q50 90 60 72Z" fill="#c4364f" stroke-width="2.5"/>
-    <rect x="7" y="82" width="86" height="9" rx="4.5" fill="#e4e4ee" stroke-width="2.5"/>
+  <rect id="bg" width="512" height="512" rx="112" fill="url(#sky)"/>
+  <path id="grass" d="M0 380 Q128 330 256 360 T512 350 V512 H0Z" fill="#8ee06a"/>
+  <path id="road" d="M206 360 L306 360 L420 512 L92 512Z" fill="#a3a7b8"/>
+  <g id="art">
+    <!-- sun -->
+    <circle cx="430" cy="92" r="38" fill="#ffe066"/>
+    <!-- checkered flag on a pole, behind the car -->
+    <g id="flag" stroke-linejoin="round">
+      <line x1="150" y1="78" x2="150" y2="330" stroke="#3d2c3e" stroke-width="12" stroke-linecap="round"/>
+      <line x1="150" y1="78" x2="150" y2="330" stroke="#e4e4ee" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="150" cy="74" r="9" fill="#ffd23f" stroke="#3d2c3e" stroke-width="4"/>
+      <polygon points="150,86 182,91 214,93 246,90 278,83 310,79 342,81 342,165 310,163 278,167 246,174 214,177 182,175 150,170" fill="#ffffff"/>
+      <polygon points="150,86 182,91 182,119 150,114" fill="#3d2c3e"/>
+      <polygon points="182,91 214,93 214,121 182,119" fill="#ffffff"/>
+      <polygon points="214,93 246,90 246,118 214,121" fill="#3d2c3e"/>
+      <polygon points="246,90 278,83 278,111 246,118" fill="#ffffff"/>
+      <polygon points="278,83 310,79 310,107 278,111" fill="#3d2c3e"/>
+      <polygon points="310,79 342,81 342,109 310,107" fill="#ffffff"/>
+      <polygon points="150,114 182,119 182,147 150,142" fill="#ffffff"/>
+      <polygon points="182,119 214,121 214,149 182,147" fill="#3d2c3e"/>
+      <polygon points="214,121 246,118 246,146 214,149" fill="#ffffff"/>
+      <polygon points="246,118 278,111 278,139 246,146" fill="#3d2c3e"/>
+      <polygon points="278,111 310,107 310,135 278,139" fill="#ffffff"/>
+      <polygon points="310,107 342,109 342,137 310,135" fill="#3d2c3e"/>
+      <polygon points="150,142 182,147 182,175 150,170" fill="#3d2c3e"/>
+      <polygon points="182,147 214,149 214,177 182,175" fill="#ffffff"/>
+      <polygon points="214,149 246,146 246,174 214,177" fill="#3d2c3e"/>
+      <polygon points="246,146 278,139 278,167 246,174" fill="#ffffff"/>
+      <polygon points="278,139 310,135 310,163 278,167" fill="#3d2c3e"/>
+      <polygon points="310,135 342,137 342,165 310,163" fill="#ffffff"/>
+      <polygon points="150,86 182,91 214,93 246,90 278,83 310,79 342,81 342,165 310,163 278,167 246,174 214,177 182,175 150,170" fill="none" stroke="#3d2c3e" stroke-width="6"/>
+    </g>
+    <!-- smiling red car, front view -->
+    <g id="car" transform="translate(110.4 162) scale(2.9)" stroke="#3d2c3e" stroke-width="3" stroke-linejoin="round">
+      <ellipse cx="50" cy="95" rx="46" ry="5" fill="#3d2c3e" opacity=".18" stroke="none"/>
+      <rect x="11" y="72" width="21" height="24" rx="7" fill="#3a3440"/>
+      <rect x="68" y="72" width="21" height="24" rx="7" fill="#3a3440"/>
+      <rect x="18" y="14" width="64" height="42" rx="17" fill="#ff5252"/>
+      <rect x="25" y="20" width="50" height="24" rx="9" fill="#bfe9ff"/>
+      <path d="M32 40 L42 24" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      <rect x="4" y="46" width="92" height="40" rx="16" fill="#ff5252"/>
+      <rect x="14" y="49" width="30" height="5" rx="2.5" fill="#fff" opacity=".55" stroke="none"/>
+      <circle cx="27" cy="62" r="11.5" fill="#fff" stroke-width="2.6"/>
+      <circle cx="73" cy="62" r="11.5" fill="#fff" stroke-width="2.6"/>
+      <circle cx="27" cy="63.5" r="6.6" fill="#2b1f33" stroke="none"/>
+      <circle cx="73" cy="63.5" r="6.6" fill="#2b1f33" stroke="none"/>
+      <circle cx="25" cy="60.5" r="2.5" fill="#fff" stroke="none"/>
+      <circle cx="71" cy="60.5" r="2.5" fill="#fff" stroke="none"/>
+      <ellipse cx="12" cy="72" rx="5" ry="3.5" fill="#ff6e96" opacity=".55" stroke="none"/>
+      <ellipse cx="88" cy="72" rx="5" ry="3.5" fill="#ff6e96" opacity=".55" stroke="none"/>
+      <path d="M40 72 Q50 90 60 72Z" fill="#c4364f" stroke-width="2.5"/>
+      <rect x="7" y="82" width="86" height="9" rx="4.5" fill="#e4e4ee" stroke-width="2.5"/>
+    </g>
+    <!-- small gold medal badge, bottom right -->
+    <g id="medal" stroke="#3d2c3e" stroke-linejoin="round">
+      <polygon points="366,292 392,292 418,352 398,360" fill="#ff5a8a" stroke-width="4"/>
+      <polygon points="442,292 416,292 390,352 410,360" fill="#ff5a8a" stroke-width="4"/>
+      <circle cx="404" cy="392" r="52" fill="#ffffff" stroke="none"/>
+      <circle cx="404" cy="392" r="46" fill="url(#gold)" stroke-width="5"/>
+      <circle cx="404" cy="392" r="34" fill="none" stroke="#fff3a8" stroke-width="4"/>
+      <path d="M404 370 l6.5 14.5 15.8 1.8 -11.7 10.8 3.2 15.7 -13.8-7.9 -13.8 7.9 3.2-15.7 -11.7-10.8 15.8-1.8z" fill="#ffffff" stroke-width="3.5"/>
+    </g>
   </g>
-  <path d="M80 70 l10 22 24 3 -18 16 5 24 -21-12 -21 12 5-24 -18-16 24-3z" fill="#ffd23f" stroke="#3d2c3e" stroke-width="5" stroke-linejoin="round"/>
 </svg>

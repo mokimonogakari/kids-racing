@@ -1,6 +1,7 @@
 // Course generation: pure data, no drawing. Used by the renderer and tests.
 import { makeRng } from './rng.js';
 import { SEGMENT_LENGTH, easeInOut } from './physics.js';
+import { gridSlots } from './ai.js';
 
 export const COURSES = {
   meadow: {
@@ -84,6 +85,7 @@ export function generateCourse(id, opts = {}) {
   addRoad(10, 20, 10, 0, 0);
   // Body of the course: gentle curves and soft hills, ends before the finishing straight.
   const finishStraight = 50;
+  const curves = []; // { index, dir } for the warning signs
   let side = rng.chance(0.5) ? 1 : -1;
   while (segments.length < goalIndex - finishStraight) {
     const room = goalIndex - finishStraight - segments.length;
@@ -96,6 +98,7 @@ export function generateCourse(id, opts = {}) {
     if (kind < 0.62) {
       curve = side * rng.range(1.6, 3.6);
       side = -side;
+      if (Math.abs(curve) > 2.2 && enter > 4) curves.push({ index: segments.length, dir: Math.sign(curve) });
     }
     const hill = rng.chance(0.45) ? rng.range(-1, 1) * rng.range(1.5, 3.5) : 0;
     addRoad(enter, hold, leave, curve, hill);
@@ -115,14 +118,49 @@ export function generateCourse(id, opts = {}) {
     eventIndex: Math.floor(goalIndex * 0.48),
     events: [],
     rivals: [],
-    counts: { star: 0, fruit: 0, boost: 0, obstacle: 0 },
+    curves,
+    counts: { star: 0, fruit: 0, boost: 0, obstacle: 0, sign: 0 },
   };
 
   placeDecorations(course, rng);
+  placeTrackside(course, rng);
   placeItems(course, rng);
   placeRivals(course, rng);
   course.events.push({ type: def.event, index: course.eventIndex, fired: false });
   return course;
+}
+
+/** Race-track dressing: curve warning boards, cones and grandstands with a crowd. */
+function placeTrackside(course, rng) {
+  const { segments, goalIndex } = course;
+  // Chevron boards a few segments before each real curve, on the outside of the bend.
+  for (const cv of course.curves) {
+    const s = segments[Math.max(0, cv.index - 4)];
+    if (!s) continue;
+    s.deco.push({ id: cv.dir > 0 ? 'signR' : 'signL', x: -cv.dir * 2.0, t: 0 });
+    course.counts.sign++;
+  }
+  // Grandstands near the start and around the goal.
+  for (const k of [-6, 0, 6]) {
+    const s = segments[START_LINE + 8 + k];
+    if (s) s.deco.push({ id: 'grandstand', x: k % 2 ? -3.9 : 3.9, t: rng.next() * 10 });
+  }
+  for (let k = 1; k <= 4; k++) {
+    const s = segments[goalIndex - 8 - k * 7];
+    if (!s) continue;
+    s.deco.push({ id: 'grandstand', x: -3.9, t: rng.next() * 10 });
+    s.deco.push({ id: 'grandstand', x: 3.9, t: rng.next() * 10 });
+  }
+  // Cones along the finishing straight and the start.
+  for (let i = goalIndex - finishStraightLen(goalIndex); i < goalIndex - 4; i += 6) {
+    const s = segments[i];
+    if (s) s.deco.push({ id: 'cone', x: i % 12 ? 1.45 : -1.45, t: 0 });
+  }
+  for (let i = 2; i < START_LINE; i += 3) segments[i].deco.push({ id: 'cone', x: i % 2 ? 1.45 : -1.45, t: 0 });
+}
+
+function finishStraightLen(goalIndex) {
+  return Math.min(50, Math.floor(goalIndex * 0.15));
 }
 
 function placeDecorations(course, rng) {
@@ -211,19 +249,16 @@ function placeItems(course, rng) {
   for (let k = course.eventIndex - 12; k < course.eventIndex + 12; k++) segments[k].obstacles.length = 0;
 }
 
+/** Everyone starts together on the grid; the Race turns these into AI racers. */
 function placeRivals(course, rng) {
   const animals = RIVAL_ANIMALS.slice();
-  const spots = [0.06, 0.2, 0.38, 0.58, 0.78];
-  spots.forEach((f, n) => {
-    course.rivals.push({
-      animal: animals[n % animals.length],
-      z: Math.floor(course.goalIndex * f) * SEGMENT_LENGTH + 400,
-      x: n % 2 ? 0.5 : -0.5,
-      speedFactor: rng.range(0.42, 0.55),
-      passed: false,
-      cheer: 0,
-      hop: 0,
-    });
+  // Shuffle so the grid order differs from race to race.
+  for (let i = animals.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [animals[i], animals[j]] = [animals[j], animals[i]];
+  }
+  gridSlots().forEach((slot, n) => {
+    course.rivals.push({ animal: animals[n % animals.length], z: slot.z, x: slot.x });
   });
 }
 

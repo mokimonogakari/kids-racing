@@ -26,7 +26,7 @@
     <!-- タイトル -->
     <section id="scr-title" class="screen menu active" aria-label="タイトル">
       <div class="sky-deco" aria-hidden="true"><i></i><i></i><i></i></div>
-      <h1 class="logo" aria-label="ぶーぶーレース"><span class="l1">ぶーぶー</span><span class="l2">レース</span></h1>
+      <h1 class="logo" aria-label="ぶーぶーレース グランプリ"><span class="l1">ぶーぶー</span><span class="l2">レース</span><span class="l3">グランプリ</span></h1>
       <canvas class="title-car" width="320" height="320" aria-hidden="true"></canvas>
       <div class="title-buttons">
         <button id="btn-book" class="round-btn book" type="button" aria-label="シールブック">
@@ -80,13 +80,14 @@
     <section id="scr-goal" class="screen goal" aria-label="ゴール" hidden>
       <div class="goal-card">
         <div class="goal-hero">
-          <div class="medal" aria-label="いちい">
-            <svg viewBox="0 0 100 120" aria-hidden="true"><path d="M30 0h16l10 40H40zM54 0h16L60 40H44z" fill="#ff5a8a" stroke="#3d2c3e" stroke-width="3"/><circle cx="50" cy="72" r="40" fill="#ffd23f" stroke="#3d2c3e" stroke-width="5"/><circle cx="50" cy="72" r="30" fill="none" stroke="#fff3a8" stroke-width="4"/><text x="50" y="90" text-anchor="middle" font-size="50" font-weight="900" fill="#e08a00" font-family="system-ui, sans-serif">1</text></svg>
-          </div>
+          <div class="medal" id="medal" aria-label="メダル"><canvas id="medal-canvas" width="240" height="240" aria-hidden="true"></canvas></div>
           <canvas class="goal-car" width="320" height="320" aria-hidden="true"></canvas>
         </div>
+        <!-- JS が .step（.p2 .p1 .p3 の順、プレイヤーには .you）を3つ入れる -->
+        <div id="podium" class="podium" aria-label="ひょうしょうだい"></div>
+        <div id="your-place" class="your-place" hidden><canvas width="120" height="120" aria-hidden="true"></canvas><b></b></div>
         <div class="earned" aria-label="もらったシール"></div>
-          <p id="race-record" class="race-record"></p>
+        <p id="race-record" class="race-record"></p>
         <div class="goal-buttons">
           <button id="btn-again" class="big-btn again" type="button" aria-label="もういっかい">
             <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M48 32a16 16 0 1 1-6-12.5" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/><path d="M36 10 L50 18 L38 28 Z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/></svg>
@@ -122,9 +123,16 @@
       <button class="toggle" type="button" data-key="music" aria-pressed="true"><span>おんがく（BGM）</span><b aria-hidden="true"></b></button>
       <button class="toggle" type="button" data-key="voice" aria-pressed="true"><span>こえ（音声ガイド）</span><b aria-hidden="true"></b></button>
       <button class="toggle" type="button" data-key="tilt" aria-pressed="false"><span>かたむけて ハンドル（傾きセンサー）</span><b aria-hidden="true"></b></button>
+      <p class="label">スピード</p>
       <div class="speed" role="group" aria-label="スピード">
         <button type="button" data-speed="slow" aria-pressed="true">のんびり</button>
         <button type="button" data-speed="normal" aria-pressed="false">ふつう</button>
+      </div>
+      <p class="label">きょうそう（ライバルの つよさ）</p>
+      <div class="rivals" role="group" aria-label="きょうそう">
+        <button type="button" data-rivals="easy" aria-pressed="false">やさしい</button>
+        <button type="button" data-rivals="normal" aria-pressed="true">ふつう</button>
+        <button type="button" data-rivals="hard" aria-pressed="false">つよい</button>
       </div>
       <p class="note">広告・外部リンク・データ送信はありません。シールの記録はこの端末の中だけに保存されます。</p>
       <div class="row">

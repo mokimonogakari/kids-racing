@@ -25,7 +25,13 @@ export function percentRemaining(n, total) {
 }
 
 export function makePlayer() {
-  return { x: 0, z: 0, speed: 0, vx: 0, bump: 0, boost: 0, offroad: false };
+  return { x: 0, z: 0, speed: 0, vx: 0, bump: 0, boost: 0, offroad: false, curb: false, drift: false, steer: 0, slip: 0, slipT: 0 };
+}
+
+/** Is the car riding the red/white curb at the edge of the road? */
+export function onCurb(x) {
+  const a = Math.abs(x);
+  return a > 0.98 && a < 1.24;
 }
 
 /**
@@ -39,8 +45,9 @@ export function stepPlayer(p, input, dt, opt) {
   const steer = clamp(input.steer || 0, -1, 1);
   const pct = clamp(p.speed / max, 0, 1.6);
 
-  // Boost timer
+  // Boost / slipstream timers
   if (p.boost > 0) p.boost = Math.max(0, p.boost - dt);
+  if (p.slip > 0) p.slip = Math.max(0, p.slip - dt);
   if (p.bump > 0) p.bump = Math.max(0, p.bump - dt);
 
   // Target speed: always moving forward, never stops.
@@ -48,18 +55,24 @@ export function stepPlayer(p, input, dt, opt) {
   let target = max;
   if (p.boost > 0) target = max * 1.45;
   else if (p.offroad) target = max * 0.62;
+  else if (p.slip > 0) target = max * 1.08; // tucked in behind a rival: a little extra pull
   if (opt.finished) target = 0;
   const rate = target > p.speed ? preset.accel : preset.accel * 1.2;
   if (p.speed < target) p.speed = Math.min(target, p.speed + rate * dt);
   else p.speed = Math.max(target, p.speed - rate * dt);
 
-  // Steering: direct, responsive, scaled a little by speed so it feels alive.
+  // Steering: responsive, with a touch of inertia so the car "leans" into turns.
+  const k = 1 - Math.pow(0.0005, dt); // ~95% of the way in 0.1 s
+  p.steer += (steer - p.steer) * k;
   const steerPower = preset.steer * (0.55 + 0.45 * Math.min(1, pct));
-  p.x += steer * steerPower * dt;
+  p.x += p.steer * steerPower * dt;
 
-  // Curves push outward very gently; the assist counters most of it.
+  // Curves push outward (centrifugal feel); the assist counters part of it.
   const curve = opt.curve || 0;
-  p.x -= curve * 0.03 * Math.min(1, pct) * (1 - preset.assist) * dt;
+  p.x -= curve * 0.045 * Math.min(1, pct) * (1 - preset.assist) * dt;
+  // Cosmetic drift: steering hard into a bend at speed.
+  p.drift = Math.abs(steer) > 0.65 && pct > 0.8 && Math.abs(curve) > 1.8 && !opt.finished;
+  p.curb = onCurb(p.x) && pct > 0.3 && !opt.finished;
 
   // Gentle help back onto the road when the child is not steering.
   if (!steer && Math.abs(p.x) > 0.85) {
