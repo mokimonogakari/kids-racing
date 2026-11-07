@@ -354,3 +354,61 @@ export function drawStartLights(r, st, t) {
   }
   c.restore();
 }
+
+/**
+ * Photo finish: while the race runs in slow motion (race.timeScale < 1) the screen gets
+ * cinema bars, a soft white edge, a camera flash on entry and a "しゃしん はんてい" label.
+ */
+export function drawPhotoFinish(r, race, t) {
+  const slow = race && typeof race.timeScale === 'number' && race.timeScale < 0.999;
+  if (slow && !r._photoOn) {
+    r._photoOn = true;
+    r._photoFlash = 1;
+  } else if (!slow) {
+    r._photoOn = false;
+  }
+  const dt = r.dt || 1 / 60;
+  r._photoBars = Math.max(0, Math.min(1, (r._photoBars || 0) + (slow ? dt * 5 : -dt * 3)));
+  if (r._photoFlash > 0) r._photoFlash = Math.max(0, r._photoFlash - dt * 3.5);
+  const k = r._photoBars;
+  if (k <= 0 && !(r._photoFlash > 0)) return;
+  const c = r.c;
+  const W = r.W;
+  const H = r.H;
+  c.save();
+  if (k > 0) {
+    // soft white vignette
+    const g = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(1, `rgba(255,255,255,${(0.45 * k).toFixed(2)})`);
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    const bh = Math.round(Math.min(H * 0.04, (r.safe ? r.safe.top : 0) + 14) * k);
+    c.fillStyle = '#1b1320';
+    c.fillRect(0, 0, W, bh);
+    c.fillRect(0, H - bh, W, bh);
+    // label just under the top bar
+    const size = Math.max(16, Math.min(30, W * 0.06));
+    c.font = `900 ${Math.round(size)}px "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", system-ui, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const ly = (r.HZ || H * 0.4) * 0.92;
+    const label = '📸 しゃしん はんてい';
+    c.globalAlpha = k;
+    c.lineJoin = 'round';
+    c.lineWidth = size * 0.32;
+    c.strokeStyle = '#ffffff';
+    c.strokeText(label, W / 2, ly);
+    c.lineWidth = size * 0.14;
+    c.strokeStyle = '#3d2c3e';
+    c.strokeText(label, W / 2, ly);
+    c.fillStyle = '#ffd23f';
+    c.fillText(label, W / 2, ly);
+    c.globalAlpha = 1;
+  }
+  if (r._photoFlash > 0) {
+    c.fillStyle = `rgba(255,255,255,${(0.85 * r._photoFlash).toFixed(2)})`;
+    c.fillRect(0, 0, W, H);
+  }
+  c.restore();
+}

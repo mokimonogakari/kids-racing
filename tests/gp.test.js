@@ -7,6 +7,7 @@ const order = (...ids) => ({ order: ids.map((id) => ({ id, finished: true })) })
 test('points follow the finishing order of each race', () => {
   const gp = createGrandPrix();
   assert.deepEqual(gp.courses, GP_COURSES);
+  assert.deepEqual(GP_COURSES, ['meadow', 'sea', 'city', 'snow'], 'four-race cup with the night city');
   assert.equal(gp.round, 0);
   gp.addResult(order('player', 'bear', 'rabbit', 'frog', 'pig', 'cat'));
   assert.equal(gp.points.player, 10);

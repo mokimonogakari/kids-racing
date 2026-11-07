@@ -135,3 +135,17 @@ test('announcer keeps a minimum gap between overtake and overtaken lines', () =>
   assert.equal(a.overtaken('frog'), true);
   assert.equal(said.length, 4);
 });
+
+test('third-wave lines: leader, rocket, jump, ghost, photo finish, night', async () => {
+  const L = await import('../js/voice-lines.js');
+  assert.equal(L.leaderLine('player'), 'いちばんに なった！');
+  assert.ok(L.leaderLine('bear').includes('くまさん'));
+  assert.ok(L.rocketLine('rabbit').includes('うさぎさん'));
+  const jumps = new Set([0, 1, 2, 3].map((i) => L.jumpLine(i)));
+  assert.equal(jumps.size, 4);
+  assert.ok(L.jumpLine(-7).length > 0 && L.jumpLine(NaN).length > 0);
+  assert.notEqual(L.ghostLine(true), L.ghostLine(false));
+  for (const f of [L.photoFinishLine, L.nightLine, L.ghostIntroLine]) assert.ok(f().length > 0);
+  assert.equal(L.COURSE_NAMES.city, 'よるの まち');
+  assert.ok(L.gpNextLine('city').includes('よるの まち'));
+});

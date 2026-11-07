@@ -2,7 +2,7 @@
 // Points go to the finishing order of each race; the best total after the last race wins.
 
 export const GP_POINTS = [10, 8, 6, 4, 2, 1];
-export const GP_COURSES = ['meadow', 'sea', 'snow'];
+export const GP_COURSES = ['meadow', 'sea', 'city', 'snow'];
 
 /** Finishing order of a race result as a list of racer ids (winner first). */
 function orderIds(result) {

@@ -104,3 +104,56 @@ test('event spot is clear of obstacles and short courses still work', () => {
     assert.equal(c.events[0].type, COURSES[id].event);
   }
 });
+
+test('night city course exists and is dressed with lamps and buildings', () => {
+  assert.ok(COURSE_IDS.includes('city'));
+  assert.equal(COURSES.city.night, true);
+  const c = generateCourse('city', { length: 1000, seed: 9 });
+  const decos = c.segments.flatMap((s) => s.deco);
+  const lamps = decos.filter((d) => d.id === 'lamp');
+  const buildings = decos.filter((d) => /^building/.test(d.id));
+  assert.ok(lamps.length > 50, 'street lamps along the road');
+  assert.ok(buildings.length > 50, 'buildings along the road');
+  for (const b of buildings) assert.ok(Math.abs(b.x) >= 3.5, 'buildings stay well off the road');
+  assert.ok(c.segments[c.eventIndex].deco.some((d) => d.id === 'owl' && d.event));
+  for (const id of ['meadow', 'sea', 'snow']) assert.ok(!COURSES[id].night);
+});
+
+test('jump ramps: 2-3 per course on straights, clear of start, finish, boosts and obstacles', () => {
+  for (const id of COURSE_IDS) {
+    for (const [length, seed] of [[300, 1], [1000, 42], [1250, 7]]) {
+      const c = generateCourse(id, { length, seed });
+      const ramps = c.segments.filter((s) => s.ramp);
+      assert.equal(ramps.length, c.counts.ramp);
+      assert.ok(ramps.length >= 2 && ramps.length <= 3, `${id} ${length}: ${ramps.length} ramps`);
+      for (const s of ramps) {
+        assert.deepEqual(s.ramp, { x: 0, w: 2.4 });
+        assert.ok(s.index >= 60 && s.index <= c.goalIndex - 60, 'away from start and finish');
+        assert.ok(Math.abs(s.index - c.eventIndex) >= 16, 'away from the event spot');
+        if (length >= 1000) {
+          for (let k = s.index - 6; k <= s.index + 8; k++) assert.ok(Math.abs(c.segments[k].curve) <= 0.35, 'on a straight');
+        }
+        for (let k = s.index - 4; k <= s.index + 4; k++) assert.equal(c.segments[k].boost, null, 'no boost pad nearby');
+        for (let k = s.index - 6; k <= s.index + 10; k++) assert.equal(c.segments[k].obstacles.length, 0, 'clear run-up');
+        assert.equal(s.items.length, 0, 'no items on the ramp');
+      }
+    }
+  }
+});
+
+test('very short courses simply have no ramps', () => {
+  const c = generateCourse('meadow', { length: 120, seed: 1 });
+  assert.equal(c.counts.ramp, 0);
+});
+
+test('course counts stay truthful after ramps clear items', () => {
+  const c = generateCourse('city', { length: 1000, seed: 3 });
+  let star = 0;
+  let fruit = 0;
+  let obstacle = 0;
+  for (const s of c.segments) {
+    for (const it of s.items) it.kind === 'star' ? star++ : fruit++;
+    obstacle += s.obstacles.length;
+  }
+  assert.deepEqual([c.counts.star, c.counts.fruit, c.counts.obstacle], [star, fruit, obstacle]);
+});

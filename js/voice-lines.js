@@ -110,7 +110,7 @@ export function gridIntroLine() {
 }
 
 // ---------------------------------------------------------------- グランプリ
-export const COURSE_NAMES = { meadow: 'はらっぱ', sea: 'うみ', snow: 'ゆきやま' };
+export const COURSE_NAMES = { meadow: 'はらっぱ', sea: 'うみ', snow: 'ゆきやま', city: 'よるの まち' };
 
 export function courseName(courseId) {
   return COURSE_NAMES[courseId] || 'つぎの コース';
@@ -165,6 +165,41 @@ export const OVERTAKEN_GAP_MS = 4000;
  * - overtake(animal): 2.5s の間隔を空けて読む（割り込みあり）。
  * - overtaken(animal): 4s の間隔を空けて読む（割り込みなし）。
  */
+/** Someone new is in the lead ('player' or an animal id). */
+export function leaderLine(id) {
+  if (id === 'player') return 'いちばんに なった！';
+  return `${rivalName(id)}が せんとう！`;
+}
+
+/** A rival's rocket start. */
+export function rocketLine(animal) {
+  return `${rivalName(animal)} ロケットスタート！`;
+}
+
+const JUMPS = ['とんだー！', 'ジャンプ！', 'たかーい！', 'そらを とんだ！'];
+/** Jump cheer; i picks a variation. */
+export function jumpLine(i = 0) {
+  const n = Math.abs(Math.floor(Number(i) || 0));
+  return JUMPS[n % JUMPS.length];
+}
+
+/** Passing / being passed by the ghost of your best run. */
+export function ghostLine(ahead) {
+  return ahead ? 'おばけを ぬいた！' : 'おばけに ぬかれた！ まけるな！';
+}
+
+export function photoFinishLine() {
+  return 'しゃしん はんてい！';
+}
+
+export function nightLine() {
+  return 'よるの まち！ ライトを つけて しゅっぱつ！';
+}
+
+export function ghostIntroLine() {
+  return 'まえの じぶんと しょうぶ！ すけている くるまが おばけ だよ';
+}
+
 export function createAnnouncer(say, now = () => Date.now()) {
   let pending = 0; // 候補の順位（0 = なし）
   let pendingAt = 0;

@@ -3,7 +3,7 @@ import { SEGMENT_LENGTH, clamp } from './physics.js';
 import { SPRITES, spriteImage, rrect, ANIMAL_COLORS } from './art.js';
 import { drawMinimap } from './minimap.js';
 import { START_LINE } from './course.js';
-import { drawRankBadge, drawSpeedo, drawPositionBar, drawFlash, drawStartLights } from './render-hud.js';
+import { drawRankBadge, drawSpeedo, drawPositionBar, drawFlash, drawStartLights, drawPhotoFinish } from './render-hud.js';
 
 const ROAD_W = 1000;
 const CAM_H = 900;
@@ -34,6 +34,14 @@ const PALETTES = {
     water: ['#4cc4f0', '#43b9e8'],
     hills: ['#6fd2c0', '#58c2ae'],
   },
+  city: {
+    sky: ['#0b1433', '#1f2a5c', '#3b3f80'],
+    grass: ['#3b4057', '#363b51'],
+    rumble: ['#ffd23f', '#3d2c3e'],
+    road: ['#4d5164', '#474b5d'],
+    lane: '#ffe680',
+    hills: ['#262c4f', '#1c2142'],
+  },
   snow: {
     sky: ['#8fc0ff', '#dbe9ff', '#f6f9ff'],
     grass: ['#f6faff', '#e7f0fb'],
@@ -46,6 +54,14 @@ const PALETTES = {
 const BOOST_COLS = ['#ff7eb6', '#ffd23f', '#5ce1e6'];
 const RIVAL_SHORT = { bear: 'くま', rabbit: 'うさぎ', frog: 'かえる', pig: 'ぶた', cat: 'ねこ' };
 const RAINBOW = ['#ff5a6e', '#ffd23f', '#5cc75c', '#4aa8ff', '#a77bff'];
+// Jumps: same curve as race.js (kept local so the renderer never depends on race internals).
+const AIR_TIME = 0.85;
+export function airLift(air) {
+  if (!(air > 0)) return 0;
+  return Math.max(0, Math.sin(Math.PI * (1 - Math.min(1, air / AIR_TIME))));
+}
+const isNight = (race) => !!(race && race.course && race.course.def && race.course.def.night);
+const palOf = (id) => PALETTES[id] || PALETTES.meadow;
 
 export class Renderer {
   constructor(canvas) {
@@ -103,8 +119,8 @@ export class Renderer {
 
 
   // ---------- background ----------
-  buildBackground(courseId) {
-    const pal = PALETTES[courseId];
+  buildBackground(courseId, night = false) {
+    const pal = palOf(courseId);
     const W = this.W;
     const dpr = this.dpr;
     const lw = Math.ceil(W * 1.5);
@@ -123,9 +139,11 @@ export class Renderer {
         c.fill();
       }
     };
-    for (let i = 0; i < 5; i++) {
-      const x = ((i + 0.3) / 5) * lw;
-      cloud(x, lh * (0.15 + (i % 2) * 0.12), Math.max(10, lh * 0.08));
+    if (!night) {
+      for (let i = 0; i < 5; i++) {
+        const x = ((i + 0.3) / 5) * lw;
+        cloud(x, lh * (0.15 + (i % 2) * 0.12), Math.max(10, lh * 0.08));
+      }
     }
     // hills / mountains (tileable: use sine sums with integer periods)
     const layer = (amp, base, col, periods, phase, peaky) => {
@@ -145,7 +163,31 @@ export class Renderer {
       c.closePath();
       c.fill();
     };
-    if (courseId === 'snow') {
+    if (night) {
+      // city skyline with lit windows (tileable: building widths wrap at lw)
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (const [depth, col, hMul] of [[0, pal.hills[0], 0.75], [1, pal.hills[1], 0.55]]) {
+        let x = 0;
+        while (x < lw) {
+          const bw = Math.min(lw - x, 22 + rnd() * 40);
+          const bh = lh * (0.22 + rnd() * hMul);
+          c.fillStyle = col;
+          c.fillRect(x, lh - bh, bw - 2, bh);
+          if (depth === 1) {
+            for (let wy = lh - bh + 6; wy < lh - 6; wy += 9) {
+              for (let wx = x + 4; wx < x + bw - 8; wx += 8) {
+                if (rnd() < 0.45) {
+                  c.fillStyle = rnd() < 0.8 ? '#ffe28a' : '#9fe0ff';
+                  c.fillRect(wx, wy, 4, 5);
+                }
+              }
+            }
+          }
+          x += bw;
+        }
+      }
+    } else if (courseId === 'snow') {
       layer(lh * 0.32, lh * 0.25, '#c9dcf4', [3, 5], 0.5, true);
       // snow caps highlight
       layer(lh * 0.22, lh * 0.12, pal.hills[0], [4, 7], 1.7, false);
@@ -169,6 +211,11 @@ export class Renderer {
     sky.addColorStop(1, pal.sky[2]);
     this.skyGrad = sky;
     this.bgCourse = courseId;
+    this.bgNight = night;
+    this.stars = [];
+    if (night) {
+      for (let i = 0; i < 60; i++) this.stars.push({ x: Math.random(), y: Math.random() * 0.75, r: 0.6 + Math.random() * 1.4, ph: Math.random() * 6 });
+    }
     this.flakes = [];
     if (courseId === 'snow') {
       for (let i = 0; i < 40; i++) this.flakes.push({ x: Math.random() * this.W, y: Math.random() * this.H, r: 1.5 + Math.random() * 2.5, s: 20 + Math.random() * 30 });
@@ -253,8 +300,9 @@ export class Renderer {
       this.rankPulse = 1;
     }
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if (this.bgCourse !== race.courseId) this.buildBackground(race.courseId);
-    const pal = PALETTES[race.courseId];
+    const night = isNight(race);
+    if (this.bgCourse !== race.courseId || this.bgNight !== night) this.buildBackground(race.courseId, night);
+    const pal = palOf(race.courseId);
     const course = race.course;
     this.goalIndex = course.goalIndex;
     const segs = course.segments;
@@ -288,7 +336,8 @@ export class Renderer {
     this.bgOffset += pSeg.curve * race.speedPct * 0.0025 * (race.state === 'race' ? 1 : 0);
     c.fillStyle = this.skyGrad;
     c.fillRect(-OVER, -OVER, W + OVER * 2, this.HZ + 2 + OVER);
-    this.drawSun(race.courseId, t);
+    if (night) this.drawNightSky(t);
+    else this.drawSun(race.courseId, t);
     const lw = this.bgLW;
     let off = ((this.bgOffset * lw) % lw + lw) % lw;
     const by = this.HZ - this.bgLH + 2 + clamp(-playerY * 0.02, -10, 10);
@@ -339,6 +388,18 @@ export class Renderer {
       if (ri >= baseI && ri < baseI + DRAW) rivalsBySeg.set(ri, (rivalsBySeg.get(ri) || []).concat(r));
     }
     const nearGoal = this.goalIndex * SEGMENT_LENGTH - p.z < 6000;
+    // the ghost: last best run, drawn see-through
+    let ghost = null;
+    try {
+      ghost = typeof race.ghostPos === 'function' ? race.ghostPos() : null;
+    } catch (e) {
+      ghost = null;
+    }
+    if (ghost && !(Number.isFinite(ghost.z) && Number.isFinite(ghost.x))) ghost = null;
+    if (ghost && race.state === 'countdown') ghost = null;
+    const ghostSeg = ghost ? Math.floor(ghost.z / SEGMENT_LENGTH) : -1;
+    const ghostBehind = ghost && ghost.z < p.z && ghost.z >= p.z - RIVAL_BEHIND;
+    this.ghostNear = ghost ? ghost.z - p.z : null;
     for (let k = drawn.length - 1; k >= 0; k--) {
       const s = drawn[k];
       const r = s.p1.r;
@@ -372,12 +433,14 @@ export class Renderer {
           lift = Math.sin(t * 2 + d.t) * 0.05 * r * this.SX;
         }
         this.sprite(id, frame, sx + r * xx * this.SX, sy, r, def.world, lift, clip);
+        if (night && id === 'lamp') this.lampGlow(sx + r * xx * this.SX, sy, r, def, clip);
       }
       if (s.index === this.goalIndex && SPRITES.flagman) {
         // the marshal waves the chequered flag as the leaders come in
         this.sprite('flagman', nearGoal ? Math.floor(t * 4) % 2 : 0, sx + r * -2.15 * this.SX, sy, r, SPRITES.flagman.world, 0, clip);
       }
       for (const ob of s.obstacles) {
+        if (!SPRITES[ob.id]) continue;
         const hop = (ob.hop > 0 ? Math.sin((1 - ob.hop / 0.6) * Math.PI) * 0.35 : 0) + jump * 0.6;
         this.sprite(ob.id, 0, sx + r * ob.x * this.SX, sy, r, SPRITES[ob.id].world, hop * r * this.SX, clip);
       }
@@ -387,6 +450,7 @@ export class Renderer {
         const pulse = 1 + Math.sin(t * 6 + s.index) * 0.07;
         this.sprite(it.id, 0, sx + r * it.x * this.SX, sy, r, SPRITES[it.id].world * pulse, bob, clip);
       }
+      if (ghost && !ghostBehind && s.index === ghostSeg && ghost.z >= p.z) this.drawGhost(ghost, s, race, t);
       const rv = rivalsBySeg.get(s.index);
       if (rv) {
         // farther first inside the segment, so nearer karts overlap them
@@ -395,7 +459,12 @@ export class Renderer {
       }
     }
 
+    if (night) this.drawHeadlights(race, t, camXRoad);
     this.drawPlayer(race, t, camXRoad);
+    if (ghostBehind) {
+      const s = segs[ghostSeg];
+      if (s && s.p1 && s.p2 && s.frame !== undefined && ghostSeg >= baseI && ghostSeg < baseI + DRAW) this.drawGhost(ghost, s, race, t);
+    }
     // rivals right behind the player appear larger and lower, over the player's car
     if (behind.length) {
       behind.sort((a, b) => b.z - a.z);
@@ -412,13 +481,15 @@ export class Renderer {
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawHud(race, t);
+    drawPhotoFinish(this, race, t);
   }
 
   /** One rival kart, interpolated inside its segment (works ahead of and behind the player). */
   drawRival(ri, s, race, t) {
     const cheer = ri.cheer > 0 || race.jump > 0;
     const wobble = ri.speed > 0 && !ri.finished ? Math.abs(Math.sin(t * 11 + ri.z * 0.013)) * 0.015 : 0;
-    const hop = (ri.hop > 0 ? Math.sin((1 - ri.hop / 0.5) * Math.PI) * 0.4 : 0) + (cheer ? Math.abs(Math.sin(t * 8)) * 0.12 : 0) + wobble;
+    const air = airLift(ri.air);
+    const hop = (ri.hop > 0 ? Math.sin((1 - ri.hop / 0.5) * Math.PI) * 0.4 : 0) + (cheer ? Math.abs(Math.sin(t * 8)) * 0.12 : 0) + wobble + air * 0.9;
     const f = (ri.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
     const rx = s.p1.x + (s.p2.x - s.p1.x) * f;
     const ry = s.p1.y + (s.p2.y - s.p1.y) * f;
@@ -441,7 +512,23 @@ export class Renderer {
         c.globalAlpha = 1;
       }
     }
+    if (air > 0) this.groundShadow(x, ry, 0.75 * rr * this.SX, air, clip);
     this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, x, ry, rr, 0.75, hop * rr * this.SX, clip, rot);
+    if (isNight(race) && (!clip || ry < clip)) {
+      // tail lights so karts read at night
+      const c = this.c;
+      const dw = 0.75 * rr * this.SX;
+      const ly = ry - dw * 0.32 - hop * rr * this.SX;
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.fillStyle = 'rgba(255,70,90,0.55)';
+      for (const sd of [-1, 1]) {
+        c.beginPath();
+        c.arc(x + sd * dw * 0.3, ly, Math.max(1.5, dw * 0.07), 0, Math.PI * 2);
+        c.fill();
+      }
+      c.restore();
+    }
     // name tag over nearby karts, so the child knows who is who
     if (Math.abs(ri.z - race.player.z) < 1600) {
       const dw = 0.75 * rr * this.SX;
@@ -570,6 +657,10 @@ export class Renderer {
       c.fill();
     } else if (s.index === START_LINE || s.index === this.goalIndex) {
       this.checker(p1, p2);
+    }
+    if (s.ramp) this.drawRamp(s);
+    if (s.boost || s.ramp || s.index === START_LINE || s.index === this.goalIndex) {
+      // lanes are not painted over pads, ramps and the chequered lines
     } else if (alt) {
       const lw1 = p1.w * 0.035;
       const lw2 = p2.w * 0.035;
@@ -579,6 +670,202 @@ export class Renderer {
         this.poly(a1 - lw1, p1.y + 1, a1 + lw1, p1.y + 1, a2 + lw2, p2.y, a2 - lw2, p2.y, pal.lane);
       }
     }
+  }
+
+  /** Moon and twinkling stars for night courses. */
+  drawNightSky(t) {
+    const c = this.c;
+    const W = this.W;
+    for (const st of this.stars || []) {
+      const a = 0.45 + 0.45 * Math.sin(t * 2 + st.ph);
+      c.fillStyle = `rgba(255,255,240,${a.toFixed(2)})`;
+      c.beginPath();
+      c.arc(st.x * W, st.y * this.HZ, st.r, 0, Math.PI * 2);
+      c.fill();
+    }
+    const r = Math.min(this.W, this.H) * 0.06;
+    const L = this.hudLayout();
+    const x = this.W - r * 2.4 - this.safe.right;
+    const y = Math.min(this.HZ - r * 2, L.countY + L.icon * 0.7 + r * 1.8);
+    const g = c.createRadialGradient(x, y, r * 0.8, x, y, r * 2.6);
+    g.addColorStop(0, 'rgba(255,246,200,0.35)');
+    g.addColorStop(1, 'rgba(255,246,200,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(x, y, r * 2.6, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#fff3c4';
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fill();
+    // sleepy smiling moon face
+    c.strokeStyle = '#8a6a3c';
+    c.lineWidth = Math.max(1.5, r * 0.08);
+    c.lineCap = 'round';
+    for (const sd of [-1, 1]) {
+      c.beginPath();
+      c.arc(x + sd * r * 0.35, y - r * 0.08, r * 0.13, 0.15 * Math.PI, 0.85 * Math.PI);
+      c.stroke();
+    }
+    c.beginPath();
+    c.arc(x, y + r * 0.15, r * 0.3, 0.2, Math.PI - 0.2);
+    c.stroke();
+  }
+
+  /** Warm light around a street lamp head plus a pool of light on the ground. */
+  lampGlow(x, y, r, def, clip) {
+    const dw = def.world * r * this.SX;
+    if (dw < 3) return;
+    const dh = dw * (def.box[1] / def.box[0]);
+    const hy = y - dh * 0.92;
+    if (clip && hy > clip) return;
+    const c = this.c;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    const rad = Math.max(6, dw * 0.9);
+    const g = c.createRadialGradient(x, hy, 0, x, hy, rad);
+    g.addColorStop(0, 'rgba(255,230,150,0.55)');
+    g.addColorStop(1, 'rgba(255,230,150,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(x, hy, rad, 0, Math.PI * 2);
+    c.fill();
+    if (!clip || y < clip) {
+      c.fillStyle = 'rgba(255,225,140,0.12)';
+      c.beginPath();
+      c.ellipse(x, y, dw * 1.6, dw * 0.35, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  }
+
+  /** Two soft headlight beams from the player's car toward the road ahead. */
+  drawHeadlights(race, t, camXRoad) {
+    const c = this.c;
+    const p = race.player;
+    const x = this.W / 2 + (p.x - camXRoad) * this.SX;
+    const y = this.HZ + this.SY - this.carW * 0.25;
+    const top = this.HZ + (this.SY * 0.18);
+    const spread = this.carW * 1.4;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    const g = c.createLinearGradient(0, y, 0, top);
+    g.addColorStop(0, 'rgba(255,240,180,0.32)');
+    g.addColorStop(1, 'rgba(255,240,180,0)');
+    c.fillStyle = g;
+    const tip = x + (this.W / 2 - x) * 0.6;
+    c.beginPath();
+    c.moveTo(x - this.carW * 0.32, y);
+    c.lineTo(tip - spread, top);
+    c.lineTo(tip + spread, top);
+    c.lineTo(x + this.carW * 0.32, y);
+    c.closePath();
+    c.fill();
+    c.restore();
+  }
+
+  /** Dark ellipse left on the road while a car is in the air (smaller the higher it is). */
+  groundShadow(x, y, w, air, clip) {
+    if (clip && y > clip) return;
+    const c = this.c;
+    const k = 1 - air * 0.35;
+    c.save();
+    c.fillStyle = `rgba(30,20,40,${(0.32 * k).toFixed(2)})`;
+    c.beginPath();
+    c.ellipse(x, y - 2, w * 0.42 * k, w * 0.09 * k, 0, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+
+  /** Yellow/black jump ramp painted across the road, with a white "up" arrow. */
+  drawRamp(s) {
+    const c = this.c;
+    const { p1, p2 } = s;
+    const b = s.ramp;
+    const w = b.w || 2.4;
+    const bx = b.x || 0;
+    const l1 = p1.x + (bx - w / 2) * p1.w;
+    const r1 = p1.x + (bx + w / 2) * p1.w;
+    const l2 = p2.x + (bx - w / 2) * p2.w;
+    const r2 = p2.x + (bx + w / 2) * p2.w;
+    // lip: the far edge stands up a little, like a real kicker
+    const lip = Math.max(2, (p1.y - p2.y) * 0.9);
+    this.poly(l1, p1.y + 1, r1, p1.y + 1, r2, p2.y - lip, l2, p2.y - lip, '#ffd23f');
+    const n = 8;
+    for (let k = 0; k < n; k += 2) {
+      const f0 = k / n;
+      const f1 = (k + 1) / n;
+      const a1 = l1 + (r1 - l1) * f0;
+      const b1 = l1 + (r1 - l1) * f1;
+      const a2 = l2 + (r2 - l2) * (f0 + 0.06);
+      const b2 = l2 + (r2 - l2) * (f1 + 0.06);
+      this.poly(a1, p1.y + 1, b1, p1.y + 1, Math.min(b2, r2), p2.y - lip, Math.min(a2, r2), p2.y - lip, '#3d2c3e');
+    }
+    this.poly(l2, p2.y - lip, r2, p2.y - lip, r2, p2.y, l2, p2.y, '#e0a800');
+    // arrow
+    const m1 = (l1 + r1) / 2;
+    const m2 = (l2 + r2) / 2;
+    const aw = (r1 - l1) * 0.08;
+    if (aw > 2) {
+      c.fillStyle = '#ffffff';
+      c.beginPath();
+      c.moveTo(m1 - aw, p1.y - 1);
+      c.lineTo(m2, p2.y - lip + 1);
+      c.lineTo(m1 + aw, p1.y - 1);
+      c.closePath();
+      c.fill();
+    }
+  }
+
+  /** The see-through "ghost" of the best run, with a soft white haze and a label when close. */
+  drawGhost(g, s, race, t) {
+    const c = this.c;
+    const f = (g.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
+    const gx = s.p1.x + (s.p2.x - s.p1.x) * f;
+    const gy = s.p1.y + (s.p2.y - s.p1.y) * f;
+    const gr = s.p1.r + (s.p2.r - s.p1.r) * f;
+    const x = gx + gr * g.x * this.SX;
+    const clip = g.z >= race.player.z ? s.clip || 0 : 0;
+    const dw = 0.78 * gr * this.SX;
+    if (dw < 3) return;
+    const bob = Math.sin(t * 3) * dw * 0.04 + airLift(g.air) * dw * 0.55;
+    const id = 'rear-' + race.vehicle;
+    c.save();
+    // haze
+    const hg = c.createRadialGradient(x, gy - dw * 0.45, 0, x, gy - dw * 0.45, dw * 0.85);
+    hg.addColorStop(0, 'rgba(255,255,255,0.35)');
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = hg;
+    c.beginPath();
+    c.arc(x, gy - dw * 0.45, dw * 0.85, 0, Math.PI * 2);
+    c.fill();
+    c.globalAlpha = 0.45;
+    this.sprite(SPRITES[id] ? id : 'rear-car', 0, x, gy, gr, 0.78, Math.max(0, bob), clip);
+    c.restore();
+    if (Math.abs(g.z - race.player.z) < 1600 && dw >= 24) this.ghostTag(x, gy - dw * 1.05 - Math.max(0, bob), dw);
+  }
+
+  ghostTag(x, y, dw) {
+    const c = this.c;
+    const size = Math.max(11, Math.min(20, dw * 0.13));
+    c.save();
+    c.font = `900 ${Math.round(size)}px "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", system-ui, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const label = 'おばけ';
+    const tw = c.measureText(label).width + size * 1.1;
+    const th = size * 1.5;
+    rrect(c, x - tw / 2, y - th / 2, tw, th, th / 2);
+    c.fillStyle = 'rgba(255,255,255,0.75)';
+    c.fill();
+    c.setLineDash([size * 0.3, size * 0.25]);
+    c.lineWidth = Math.max(1.5, size * 0.12);
+    c.strokeStyle = '#9b8fb0';
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = '#6b5f80';
+    c.fillText(label, x, y + size * 0.05);
+    c.restore();
   }
 
   checker(p1, p2) {
@@ -618,6 +905,12 @@ export class Renderer {
     const steer = typeof p.steer === 'number' ? p.steer : this.steer || 0;
     rot += steer * (p.drift ? 0.11 : 0.06);
     if (race.state === 'goal') lift = Math.abs(Math.sin(race.stateTime * 5)) * w * 0.12;
+    const air = airLift(p.air);
+    if (air > 0) {
+      lift += air * w * 0.55;
+      rot += Math.sin(air * Math.PI) * 0.04;
+      this.groundShadow(x, y, w, air, 0);
+    }
     // boost rainbow trail
     if (p.boost > 0) {
       const tw = w * 0.85;

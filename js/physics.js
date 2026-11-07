@@ -5,6 +5,15 @@
 export const SEGMENT_LENGTH = 200;
 export const ROAD_LIMIT = 1.9; // soft fence: the car can never go further than this
 export const PLAYER_W = 0.62; // half-road units
+/** Seconds a car spends in the air after a jump ramp. */
+export const AIR_TIME = 0.85;
+
+/** Height (0..1) of a car that has `air` seconds of flight left. */
+export function airLift(air) {
+  if (!(air > 0)) return 0;
+  const k = clamp(1 - air / AIR_TIME, 0, 1);
+  return Math.sin(Math.PI * k);
+}
 
 export const SPEED_PRESETS = {
   slow: { maxSpeed: 2700, accel: 1500, steer: 2.1, assist: 0.55, magnet: 0.55 },
@@ -25,7 +34,7 @@ export function percentRemaining(n, total) {
 }
 
 export function makePlayer() {
-  return { x: 0, z: 0, speed: 0, vx: 0, bump: 0, boost: 0, offroad: false, curb: false, drift: false, steer: 0, slip: 0, slipT: 0 };
+  return { x: 0, z: 0, speed: 0, vx: 0, bump: 0, boost: 0, offroad: false, curb: false, drift: false, steer: 0, slip: 0, slipT: 0, air: 0 };
 }
 
 /** Is the car riding the red/white curb at the edge of the road? */
@@ -64,7 +73,7 @@ export function stepPlayer(p, input, dt, opt) {
   // Steering: responsive, with a touch of inertia so the car "leans" into turns.
   const k = 1 - Math.pow(0.0005, dt); // ~95% of the way in 0.1 s
   p.steer += (steer - p.steer) * k;
-  const steerPower = preset.steer * (0.55 + 0.45 * Math.min(1, pct));
+  const steerPower = preset.steer * (0.55 + 0.45 * Math.min(1, pct)) * (p.air > 0 ? 0.5 : 1);
   p.x += p.steer * steerPower * dt;
 
   // Curves push outward (centrifugal feel); the assist counters part of it.

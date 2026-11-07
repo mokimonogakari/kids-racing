@@ -127,6 +127,7 @@ export class Sound {
   }
 
   suspend() {
+    this.nightStop();
     try {
       if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
     } catch (e) {}
@@ -365,6 +366,7 @@ export class Sound {
 
   engineStop() {
     this.rivalEngineStop();
+    this.nightStop();
     if (!this.engine) return;
     const e = this.engine;
     this.engine = null;
@@ -498,6 +500,80 @@ export class Sound {
   standingsSting() {
     this.sfxCall(sfx.standingsSting);
   }
+  /** Jump-ramp take-off. */
+  jump() {
+    this.sfxCall(sfx.jump);
+  }
+  /** Soft landing after a jump. */
+  land() {
+    this.sfxCall(sfx.land);
+  }
+  /** Photo-finish camera click. */
+  shutter() {
+    this.sfxCall(sfx.shutter);
+  }
+
+  /**
+   * Gentle night ambience for the city course: soft crickets and a low warm hum.
+   * nightAmbience(false), stopMusic(), engineStop() and suspend() all stop it.
+   */
+  nightAmbience(on = true) {
+    if (!on) {
+      this.nightStop();
+      return;
+    }
+    if (this.night || !this.ok()) return;
+    try {
+      const c = this.ctx;
+      const t = c.currentTime;
+      const out = c.createGain();
+      out.gain.setValueAtTime(0.0001, t);
+      out.gain.exponentialRampToValueAtTime(0.5, t + 1.2);
+      out.connect(this.sfx);
+      // warm hum
+      const hum = c.createOscillator();
+      hum.type = 'sine';
+      hum.frequency.value = 110;
+      const hg = c.createGain();
+      hg.gain.value = 0.012;
+      hum.connect(hg);
+      hg.connect(out);
+      hum.start(t);
+      const night = { out, nodes: [hum], timer: null };
+      // crickets: short chirp bursts scheduled on a timer
+      const chirp = () => {
+        if (!this.night || !this.ok()) return;
+        const t0 = this.ctx.currentTime + 0.02;
+        const f = 4200 + Math.random() * 900;
+        const n = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n; i++) {
+          this.tone(f, t0 + i * 0.07, 0.04, { type: 'sine', gain: 0.025, dest: out });
+        }
+      };
+      night.timer = setInterval(chirp, 900);
+      this.night = night;
+    } catch (e) {
+      this.night = null;
+    }
+  }
+  nightStop() {
+    const n = this.night;
+    if (!n) return;
+    this.night = null;
+    try {
+      if (n.timer) clearInterval(n.timer);
+      const t = this.ctx ? this.ctx.currentTime : 0;
+      n.out.gain.cancelScheduledValues(t);
+      n.out.gain.setTargetAtTime(0.0001, t, 0.2);
+      for (const o of n.nodes) o.stop(t + 0.8);
+      setTimeout(() => {
+        try {
+          n.out.disconnect();
+        } catch (e) {}
+      }, 1000);
+    } catch (e) {}
+  }
+
   sfxCall(fn, ...args) {
     if (typeof fn !== 'function' || !this.ok()) return;
     try {
@@ -527,6 +603,7 @@ export class Sound {
   }
 
   stopMusic() {
+    this.nightStop();
     this.track = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;

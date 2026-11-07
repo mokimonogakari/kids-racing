@@ -1727,7 +1727,9 @@ export function drawCourseTile(c, id, w, h) {
     meadow: ['#7fd3ff', '#d4f3ff', '#8ee06a', '#6fcf55'],
     sea: ['#5cc8ff', '#c9f0ff', '#ffe6a6', '#4cc4f0'],
     snow: ['#9ec9ff', '#e8f2ff', '#f4f9ff', '#d6e6f8'],
-  }[id];
+    city: ['#1d2457', '#4b4f9a', '#3a4570', '#2f3a62'],
+  }[id] || ['#7fd3ff', '#d4f3ff', '#8ee06a', '#6fcf55'];
+  const night = id === 'city';
   sky.addColorStop(0, pal[0]);
   sky.addColorStop(1, pal[1]);
   c.fillStyle = sky;
@@ -1751,10 +1753,40 @@ export function drawCourseTile(c, id, w, h) {
     ell(c, w * 0.8, hy + 4, w * 0.35, h * 0.18);
     c.fill();
   }
-  // sun
-  circ(c, w * 0.84, h * 0.17, h * 0.09);
-  c.fillStyle = '#ffe066';
-  c.fill();
+  if (night) {
+    // stars and a smiling moon
+    c.fillStyle = '#fff6c9';
+    for (let k = 0; k < 14; k++) {
+      const sx = ((k * 73) % 100) / 100 * w;
+      const sy = ((k * 37) % 45) / 100 * h;
+      circ(c, sx, sy, Math.max(1, h * 0.008 * (1 + (k % 3))));
+      c.fill();
+    }
+    circ(c, w * 0.84, h * 0.17, h * 0.09);
+    c.fillStyle = '#fff1a8';
+    c.fill();
+    circ(c, w * 0.865, h * 0.15, h * 0.08);
+    c.fillStyle = pal[0];
+    c.fill();
+    // skyline
+    c.fillStyle = '#2a2f63';
+    const bw = [0.1, 0.08, 0.12, 0.07, 0.11, 0.09, 0.1];
+    let bx = 0;
+    for (let k = 0; bx < w; k++) {
+      const ww = bw[k % bw.length] * w;
+      const bh = h * (0.12 + ((k * 29) % 17) / 100);
+      c.fillRect(bx, hy - bh, ww - 2, bh);
+      c.fillStyle = '#ffe27a';
+      for (let r = 0; r < 3; r++) if ((k + r) % 2 === 0) c.fillRect(bx + ww * 0.3, hy - bh + h * 0.03 + r * h * 0.04, ww * 0.25, h * 0.02);
+      c.fillStyle = '#2a2f63';
+      bx += ww;
+    }
+  } else {
+    // sun
+    circ(c, w * 0.84, h * 0.17, h * 0.09);
+    c.fillStyle = '#ffe066';
+    c.fill();
+  }
   c.fillStyle = pal[2];
   c.fillRect(0, hy, w, h - hy);
   if (id === 'sea') {
@@ -1769,7 +1801,7 @@ export function drawCourseTile(c, id, w, h) {
     c.fillRect(0, hy - 2, w, 6);
   }
   // road
-  c.fillStyle = id === 'snow' ? '#9fb0c8' : '#9aa0b0';
+  c.fillStyle = id === 'snow' ? '#9fb0c8' : night ? '#5b5f78' : '#9aa0b0';
   c.beginPath();
   c.moveTo(w * 0.47, hy);
   c.lineTo(w * 0.53, hy);
@@ -1803,6 +1835,11 @@ export function drawCourseTile(c, id, w, h) {
     put('palm', w * 0.12, h * 0.82, S * 0.42);
     put('whale', w * 0.86, hy + h * 0.2, S * 0.32, 1);
     put('crab', w * 0.15, h * 0.97, S * 0.18);
+  } else if (night) {
+    put('lamp', w * 0.12, h * 0.9, S * 0.4);
+    put('lamp', w * 0.88, h * 0.9, S * 0.4);
+    put('owl', w * 0.78, hy + h * 0.14, S * 0.26, 1);
+    put('building2', w * 0.2, hy + h * 0.12, S * 0.32);
   } else {
     put('pine', w * 0.1, hy + h * 0.2, S * 0.32);
     put('snowmanBig', w * 0.86, h * 0.95, S * 0.4, 1);

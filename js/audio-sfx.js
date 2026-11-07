@@ -178,3 +178,30 @@ export function slipstream(sound) {
   sound.noise(t, 0.6, { filter: 'highpass', freq: 3000, sweep: 6000, gain: 0.08, attack: 0.08 });
   sound.tone(400, t, 0.4, { type: 'sine', slide: 700, gain: 0.03, attack: 0.05, release: 0.2 });
 }
+
+/** Take-off from a jump ramp: a soft rising "ぴょーん". */
+export function jump(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.tone(320, t, 0.42, { type: 'triangle', slide: 820, slideTime: 0.36, gain: 0.16, release: 0.12 });
+  sound.tone(640, t + 0.04, 0.3, { type: 'sine', slide: 1400, slideTime: 0.26, gain: 0.07 });
+  sound.noise(t, 0.35, { filter: 'highpass', freq: 1800, sweep: 4200, gain: 0.05, attack: 0.05 });
+}
+
+/** Landing: a gentle springy "ぽよん" thud (never harsh). */
+export function land(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.tone(150, t, 0.18, { type: 'sine', slide: 70, slideTime: 0.15, gain: 0.26 });
+  sound.noise(t, 0.08, { filter: 'lowpass', freq: 500, gain: 0.12 });
+  sound.tone(420, t + 0.08, 0.16, { type: 'triangle', slide: 560, slideTime: 0.1, gain: 0.08 });
+}
+
+/** Photo-finish camera "カシャ". */
+export function shutter(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.noise(t, 0.04, { filter: 'highpass', freq: 3000, gain: 0.2 });
+  sound.noise(t + 0.07, 0.06, { filter: 'bandpass', freq: 2200, q: 2, gain: 0.16 });
+  sound.tone(1800, t + 0.07, 0.05, { type: 'square', gain: 0.03 });
+}

@@ -127,6 +127,28 @@ export function drawMinimap(r, race, t) {
   c.strokeStyle = '#3d2c3e';
   c.strokeRect(gx - cell, gy - cell, cell * 2, cell * 2);
 
+  // ghost of the best run: a faint white dot under everyone
+  let ghost = null;
+  try {
+    ghost = typeof race.ghostPos === 'function' ? race.ghostPos() : null;
+  } catch (e) {
+    ghost = null;
+  }
+  if (ghost && Number.isFinite(ghost.z)) {
+    const gp = pointAt(path, ghost.z);
+    c.save();
+    c.globalAlpha = 0.8;
+    c.beginPath();
+    c.arc(toX(gp), toY(gp), 4.5, 0, Math.PI * 2);
+    c.fillStyle = '#ffffff';
+    c.fill();
+    c.setLineDash([2, 2]);
+    c.lineWidth = 1.5;
+    c.strokeStyle = '#8a7fa3';
+    c.stroke();
+    c.restore();
+  }
+
   // rivals
   const colors = ANIMAL_COLORS || {};
   for (const rv of race.rivals || []) {

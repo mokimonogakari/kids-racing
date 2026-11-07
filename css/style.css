@@ -213,10 +213,10 @@ svg { display: block; pointer-events: none; }
   gap: 14px;
 }
 .vehicles { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(3, 1fr); }
-.courses { grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); }
+.courses { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
 @media (orientation: landscape) {
   .vehicles { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
-  .courses { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr; }
+  .courses { grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr; }
   .screen { gap: 8px; }
 }
 

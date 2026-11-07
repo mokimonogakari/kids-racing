@@ -2,7 +2,7 @@
 import { generateCourse } from './course.js';
 import { makeRng } from './rng.js';
 import {
-  SEGMENT_LENGTH, SPEED_PRESETS, makePlayer, stepPlayer, overlap, bounce, startBoost, progress, PLAYER_W,
+  SEGMENT_LENGTH, SPEED_PRESETS, makePlayer, stepPlayer, overlap, bounce, startBoost, progress, PLAYER_W, AIR_TIME,
 } from './physics.js';
 import { AI_LEVELS, makeRival, stepRival, separateRivals, rankOf, finishOrder, playerGridPos, RIVAL_W } from './ai.js';
 import { vehiclePreset } from './vehicle-stats.js';
@@ -14,6 +14,49 @@ export const BOOST_AUTO_SECS = 6;
 export const BOOST_SECS = 2.4;
 /** A rival must get this far past the player (or fall this far behind) before the rank changes. */
 export const RANK_MARGIN = 60;
+/** Ghost recording interval (race seconds) and the margin before "passed the ghost" counts. */
+export const TRACE_STEP = 0.1;
+export const GHOST_MARGIN = 80;
+/** Photo finish: slow motion when the player and another kart arrive together. */
+export const PHOTO_DIST = 900;
+export const PHOTO_GAP = 220;
+export const PHOTO_SCALE = 0.35;
+export const PHOTO_SECS = 1.4;
+/** Seconds a new leader must hold the lead before it is announced. */
+export const LEADER_SETTLE = 0.8;
+
+/** Keep only well-formed [t, x, z] samples in time order; null when nothing usable. */
+export function cleanTrace(trace) {
+  if (!Array.isArray(trace)) return null;
+  const out = [];
+  for (const s of trace) {
+    if (!Array.isArray(s) || s.length < 3) continue;
+    const [t, x, z] = s;
+    if (![t, x, z].every(Number.isFinite)) continue;
+    if (out.length && t <= out[out.length - 1][0]) continue;
+    out.push([t, x, z]);
+  }
+  return out.length >= 2 ? out : null;
+}
+
+/** Position on a trace at race time t (linear interpolation), or null after its end. */
+export function tracePos(trace, t) {
+  if (!trace || !trace.length) return null;
+  if (t <= trace[0][0]) return { x: trace[0][1], z: trace[0][2] };
+  const last = trace[trace.length - 1];
+  if (t > last[0]) return null;
+  let lo = 0;
+  let hi = trace.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (trace[mid][0] <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = trace[lo];
+  const b = trace[hi];
+  const k = b[0] > a[0] ? (t - a[0]) / (b[0] - a[0]) : 0;
+  return { x: a[1] + (b[1] - a[1]) * k, z: a[2] + (b[2] - a[2]) * k };
+}
 
 export class Race {
   /**
@@ -63,6 +106,40 @@ export class Race {
     this.slipAt = -9;
     this.stableRank = 0; // last rank announced as "stable"
     this.rankSince = 0; // time at which the current rank was reached
+    // Ghost (the child's own best run on this course) and our own recording.
+    this.ghost = cleanTrace(o.ghost);
+    this.trace = [];
+    this.traceAt = -Infinity;
+    this.ghostAhead = null; // is the ghost ahead of the player? (null until the race starts)
+    // Photo finish slow motion.
+    this.timeScale = 1;
+    this.photoDone = false;
+    this.photoLeft = 0;
+    // Leader announcements.
+    this.leaderId = null;
+    this.leaderCand = null;
+    this.leaderSince = 0;
+    this.rampSeg = -1;
+  }
+
+  /** Seconds since the green light (negative during the countdown). */
+  get raceClock() {
+    return this.time - COUNTDOWN;
+  }
+
+  /** Where the ghost car is right now ({x, z}), or null without a ghost / after it finished. */
+  ghostPos() {
+    if (!this.ghost) return null;
+    return tracePos(this.ghost, this.raceClock);
+  }
+
+  recordTrace(force = false) {
+    const t = this.raceClock;
+    if (t < 0) return;
+    if (!force && t - this.traceAt < TRACE_STEP - 1e-9) return;
+    this.traceAt = t;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    this.trace.push([r2(t), r2(this.player.x), r2(this.player.z)]);
   }
 
   emit(name, ...args) {
@@ -135,6 +212,12 @@ export class Race {
   }
 
   update(dt, input = {}) {
+    // Photo finish: the world runs in slow motion for a short real-time moment.
+    if (this.photoLeft > 0) {
+      this.photoLeft = Math.max(0, this.photoLeft - dt);
+      if (this.photoLeft === 0) this.timeScale = 1;
+    }
+    dt *= this.timeScale;
     this.time += dt;
     this.stateTime += dt;
     if (this.jump > 0) this.jump = Math.max(0, this.jump - dt);
@@ -153,6 +236,10 @@ export class Race {
         this.state = 'race';
         this.stateTime = 0;
         this.rankSince = this.time;
+        this.leaderId = this.order[0].id;
+        this.leaderCand = this.leaderId;
+        this.leaderSince = this.time;
+        this.recordTrace(true);
         this.emit('go');
       }
       return;
@@ -162,6 +249,10 @@ export class Race {
     const finished = this.state === 'goal';
     const seg = this.course.segments[this.segIndex(p.z)];
     const z0 = p.z;
+    if (p.air > 0) {
+      p.air = Math.max(0, p.air - dt);
+      if (p.air === 0) this.emit('land', 'player');
+    }
     const fenced = stepPlayer(p, finished ? { steer: 0 } : input, dt, { preset: this.playerPreset, curve: seg.curve, finished });
     if (fenced && !finished && this.time - (this.fenceAt || -9) > 1.2) {
       this.fenceAt = this.time;
@@ -191,13 +282,25 @@ export class Race {
     for (const r of this.rivals) {
       const wasFinished = r.finished;
       stepRival(r, ctx, dt);
+      if (r.rocket && !r.rocketSaid) {
+        r.rocketSaid = true;
+        this.emit('rivalRocket', r.animal);
+      }
+      if (r.jumped) {
+        r.jumped = false;
+        this.emit('jump', r.animal);
+      }
+      if (r.landed) {
+        r.landed = false;
+        this.emit('land', r.animal);
+      }
       if (!wasFinished && r.finished) {
         // Sub-frame crossing time, so two karts finishing in the same frame keep their real order.
         r.finishTime = this.time - Math.max(0, r.z - this.course.goalZ) / Math.max(1, r.speed);
         this.emit('rivalFinish', r.animal, this.order.findIndex((e) => e.id === r.animal) + 1);
       }
       // Bumping into each other: soft, playful, never a stop.
-      if (!finished && Math.abs(r.z - p.z) < 170 && overlap(p.x, PLAYER_W, r.x, RIVAL_W, 0.92) && this.time - this.rivalBumpAt > 0.9) {
+      if (!finished && !(p.air > 0) && !(r.air > 0) && Math.abs(r.z - p.z) < 170 && overlap(p.x, PLAYER_W, r.x, RIVAL_W, 0.92) && this.time - this.rivalBumpAt > 0.9) {
         this.rivalBumpAt = this.time;
         const dir = bounce(p, r.x, 0.86);
         r.vx = -dir * 1.9;
@@ -245,6 +348,12 @@ export class Race {
 
     if (!finished) this.checkTrack(z0, p.z);
     this.updateEvents(dt);
+    if (!finished) {
+      this.recordTrace();
+      this.checkGhost();
+      this.checkLeader();
+      this.checkPhotoFinish();
+    }
 
     if (!finished) {
       const pr = this.progress;
@@ -263,12 +372,54 @@ export class Race {
         this.stateTime = 0;
         this.finishTime = this.time;
         this.finishExact = this.time - Math.max(0, p.z - this.course.goalZ) / Math.max(1, p.speed);
+        this.recordTrace(true);
         // Final place comes from the finish order, so it always matches result().positions.
         this.finalRank = this.order.findIndex((e) => e.id === 'player') + 1 || rankOf(p.z, this.rivals);
         this.rank = this.finalRank;
         this.emit('goal', this.result());
       }
     }
+  }
+
+  /** Passing (or being passed by) the ghost, with a margin so side-by-side does not flicker. */
+  checkGhost() {
+    const g = this.ghostPos();
+    if (!g || this.raceClock < 0) return;
+    const p = this.player;
+    // null = side by side (as on the grid); whoever gets clearly ahead flips it.
+    if (this.ghostAhead !== false && p.z > g.z + GHOST_MARGIN) {
+      this.ghostAhead = false;
+      this.emit('ghostPass', true);
+    } else if (this.ghostAhead !== true && g.z > p.z + GHOST_MARGIN) {
+      this.ghostAhead = true;
+      this.emit('ghostPass', false);
+    }
+  }
+
+  /** Announce a new leader once it has held the lead for a moment (not in the first seconds). */
+  checkLeader() {
+    const id = this.order[0].id;
+    if (id !== this.leaderCand) {
+      this.leaderCand = id;
+      this.leaderSince = this.time;
+    }
+    if (this.raceClock >= 3 && id !== this.leaderId && this.time - this.leaderSince >= LEADER_SETTLE) {
+      this.leaderId = id;
+      this.emit('leader', id);
+    }
+  }
+
+  /** A close finish: slow the world down for a moment, once per race. */
+  checkPhotoFinish() {
+    if (this.photoDone) return;
+    const p = this.player;
+    const left = this.course.goalZ - p.z;
+    if (left <= 0 || left > PHOTO_DIST) return;
+    if (!this.rivals.some((r) => !r.finished && Math.abs(r.z - p.z) < PHOTO_GAP)) return;
+    this.photoDone = true;
+    this.timeScale = PHOTO_SCALE;
+    this.photoLeft = PHOTO_SECS;
+    this.emit('photoFinish');
   }
 
   /** Sitting in a rival's slipstream (60..380 behind, same lane) for 0.8 s gives a short pull. */
@@ -319,8 +470,13 @@ export class Race {
           this.emit('collect', it.kind, it.id);
         }
       }
+      if (s.ramp && !(p.air > 0) && this.rampSeg !== i && this.speedPct > 0.45 && overlap(p.x, PLAYER_W, s.ramp.x, s.ramp.w)) {
+        this.rampSeg = i;
+        p.air = AIR_TIME;
+        this.emit('jump', 'player');
+      }
       for (const ob of s.obstacles) {
-        if (overlap(p.x, PLAYER_W, ob.x, ob.w, 0.9) && this.time - (ob.hitAt || -9) > 1) {
+        if (!(p.air > 0) && overlap(p.x, PLAYER_W, ob.x, ob.w, 0.9) && this.time - (ob.hitAt || -9) > 1) {
           ob.hitAt = this.time;
           ob.hop = 0.6;
           bounce(p, ob.x, 0.7);
@@ -349,7 +505,7 @@ export class Race {
         this.cowX = Math.min(2.6, -2.6 + ev.t * 0.95);
         const cz = ev.index * SEGMENT_LENGTH;
         const p = this.player;
-        if (Math.abs(cz - p.z) < 260 && Math.abs(this.cowX - p.x) < 0.9 && this.time - this.cowBumpAt > 1.5) {
+        if (!(p.air > 0) && Math.abs(cz - p.z) < 260 && Math.abs(this.cowX - p.x) < 0.9 && this.time - this.cowBumpAt > 1.5) {
           this.cowBumpAt = this.time;
           bounce(p, this.cowX, 0.75);
           this.emit('bump', 'cow');
@@ -383,6 +539,7 @@ export class Race {
       overtakes: this.overtakes,
       level: this.levelId,
       order,
+      trace: this.trace.slice(),
     };
   }
 }

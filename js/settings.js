@@ -11,12 +11,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   tilt: false,
   speed: 'slow', // 'slow' (のんびり) | 'normal' (ふつう)
   rivals: 'normal', // 'easy' | 'normal' | 'hard'
+  ghost: true, // おばけ（前の じぶん）を表示
 });
 
 export function sanitizeSettings(raw) {
   const s = { ...DEFAULT_SETTINGS };
   if (raw && typeof raw === 'object') {
-    for (const k of ['sound', 'music', 'voice', 'tilt']) if (typeof raw[k] === 'boolean') s[k] = raw[k];
+    for (const k of ['sound', 'music', 'voice', 'tilt', 'ghost']) if (typeof raw[k] === 'boolean') s[k] = raw[k];
     if (raw.speed === 'slow' || raw.speed === 'normal') s.speed = raw.speed;
     if (RIVAL_LEVELS.includes(raw.rivals)) s.rivals = raw.rivals;
   }

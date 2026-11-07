@@ -13,6 +13,13 @@ import { loadSettings, saveSettings } from './settings.js';
 import { getStorage } from './storage.js';
 import { createRecords, formatTime } from './records.js';
 import * as L from './voice-lines.js';
+// Ghost runs (best lap of each course). Loaded lazily so a missing/broken module never blocks the game.
+let ghosts = null;
+import('./ghost.js')
+  .then((m) => {
+    if (typeof m.createGhostStore === 'function') ghosts = m.createGhostStore(storage);
+  })
+  .catch(() => {});
 import { steerFromPointer, steerFromTilt, clamp } from './physics.js';
 
 const params = new URLSearchParams(location.search);
@@ -104,6 +111,7 @@ function show(name) {
   document.body.classList.toggle('racing', ['race', 'goal', 'standings', 'cup'].includes(name));
   if (name === 'title' || name === 'vehicle' || name === 'course' || name === 'book') {
     sound.playMusic('menu');
+    sound.nightAmbience?.(false);
   }
 }
 
@@ -295,7 +303,16 @@ function startRace() {
   announcer.reset();
   sound.setTempo?.(1);
   const seed = params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9);
+  let ghostRec = null;
+  try {
+    ghostRec = settings.ghost && ghosts ? ghosts.get(app.course) : null;
+  } catch (e) {
+    ghostRec = null;
+  }
+  app.ghost = ghostRec && Array.isArray(ghostRec.trace) && ghostRec.trace.length > 1 ? ghostRec : null;
+  app.jumps = 0;
   app.race = new Race({
+    ghost: app.ghost ? app.ghost.trace : null,
     course: app.course,
     vehicle: app.vehicle,
     speed: settings.speed,
@@ -309,7 +326,11 @@ function startRace() {
   updateStarHud();
   btnBoost?.classList.remove('ready', 'fire');
   buildGridIntro();
-  voice.say(L.startLine());
+  const night = !!(COURSES[app.course] && COURSES[app.course].night);
+  sound.nightAmbience?.(night);
+  if (night) voice.say(say('nightLine', 'よるの まち！ ライトを つけて しゅっぱつ！'));
+  if (app.ghost) voice.say(say('ghostIntroLine', 'まえの じぶんと しょうぶ！ すけている くるまが おばけ だよ'), { interrupt: false });
+  voice.say(L.startLine(), { interrupt: false });
   lastT = 0;
 }
 
@@ -458,6 +479,33 @@ function raceHooks() {
       sound.setTempo?.(1.12);
     },
     honk: () => sound.horn(app.vehicle),
+    jump: (who) => {
+      if (who !== 'player') return;
+      sound.jump?.();
+      vibrate(20);
+      voice.say(say('jumpLine', 'とんだー！', app.jumps++), { minGap: 3000, interrupt: false });
+    },
+    land: (who) => {
+      if (who !== 'player') return;
+      sound.land?.();
+      renderer.shake?.(0.6);
+      renderer.burst(renderer.carX, renderer.carY, 10, ['#ffffff', '#e8e2d6', '#ffd23f'], 180);
+      vibrate(35);
+    },
+    ghostPass: (ahead) => {
+      if (ahead) flashText('おばけを ぬいた！');
+      voice.say(say('ghostLine', ahead ? 'おばけを ぬいた！' : 'おばけに ぬかれた！ まけるな！', ahead), { minGap: 4000, interrupt: false });
+    },
+    photoFinish: () => {
+      sound.shutter?.();
+      voice.say(say('photoFinishLine', 'しゃしん はんてい！'));
+      vibrate([30, 30, 30]);
+    },
+    rivalRocket: (animal) => voice.say(say('rocketLine', 'ロケットスタート！', animal), { minGap: 5000, interrupt: false }),
+    leader: (id) => {
+      if (id === 'player') sound.chime(true);
+      voice.say(say('leaderLine', id === 'player' ? 'いちばんに なった！' : 'せんとうが かわった！', id), { minGap: 3500, interrupt: false });
+    },
     goal: (result) => onGoal(result),
   };
 }
@@ -486,6 +534,14 @@ function onGoal(result) {
   app.earned = earned;
   app.fresh = book.add(earned);
   app.recordInfo = records.update(app.course, result);
+  try {
+    const trace = result.trace || (app.race && app.race.trace);
+    if (ghosts && Array.isArray(trace) && trace.length > 1) {
+      app.recordInfo.newGhost = !!ghosts.offer(app.course, { time: result.raceTime, vehicle: app.vehicle, trace });
+    }
+  } catch (e) {
+    /* ghost saving is optional */
+  }
   if (app.mode === 'gp' && app.gp) {
     try {
       app.gp.addResult(result);
@@ -719,7 +775,7 @@ function startGrandPrix() {
   sound.pop();
   app.mode = 'gp';
   app.gp = createGrandPrix();
-  voice.say(say('gpStartLine', 'グランプリ スタート！ ３つの コースで しょうぶ！'));
+  voice.say(say('gpStartLine', 'グランプリ スタート！ ４つの コースで しょうぶ！'));
   go('vehicle');
 }
 
@@ -1158,6 +1214,7 @@ $('#btn-reset').addEventListener('click', () => {
   if (ok) {
     book.reset();
     records.reset?.();
+    ghosts?.reset?.();
     if (app.screen === 'book') buildBook();
   }
 });
@@ -1177,6 +1234,9 @@ if ('serviceWorker' in navigator && params.get('nosw') !== '1') {
 
 // Small hook for automated tests / debugging (read-only use).
 window.__kr = {
+  get ghosts() {
+    return ghosts;
+  },
   get app() {
     return app;
   },

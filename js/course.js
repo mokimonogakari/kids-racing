@@ -35,9 +35,22 @@ export const COURSES = {
     animals: ['penguin'],
     music: 'snow',
   },
+  city: {
+    id: 'city',
+    label: 'よるの まち',
+    night: true,
+    fruits: ['grape', 'strawberry'],
+    obstacle: 'roadblock',
+    event: 'owl',
+    deco: ['building', 'building2', 'house', 'bush', 'flowers', 'tree'],
+    animals: ['owl'],
+    music: 'snow',
+  },
 };
 
 export const COURSE_IDS = Object.keys(COURSES);
+
+const BUILDINGS = ['building', 'building2', 'building3', 'building4'];
 
 export const START_LINE = 9;
 
@@ -45,7 +58,7 @@ export const RIVAL_ANIMALS = ['bear', 'rabbit', 'frog', 'pig', 'cat'];
 
 /**
  * Build a course.
- * @param {string} id meadow | sea | snow
+ * @param {string} id meadow | sea | snow | city
  * @param {{length?: number, seed?: number}} opts length = segments until goal
  */
 export function generateCourse(id, opts = {}) {
@@ -67,6 +80,7 @@ export function generateCourse(id, opts = {}) {
       items: [],
       obstacles: [],
       boost: null,
+      ramp: null,
       sea: def.id === 'sea',
       clip: 0,
     });
@@ -119,12 +133,13 @@ export function generateCourse(id, opts = {}) {
     events: [],
     rivals: [],
     curves,
-    counts: { star: 0, fruit: 0, boost: 0, obstacle: 0, sign: 0 },
+    counts: { star: 0, fruit: 0, boost: 0, obstacle: 0, sign: 0, ramp: 0 },
   };
 
   placeDecorations(course, rng);
   placeTrackside(course, rng);
   placeItems(course, rng);
+  placeRamps(course, rng);
   placeRivals(course, rng);
   course.events.push({ type: def.event, index: course.eventIndex, fired: false });
   return course;
@@ -174,11 +189,17 @@ function placeDecorations(course, rng) {
       if (sea && !leftSide) {
         if (rng.chance(0.35)) s.deco.push({ id: rng.pick(def.decoSea), x: rng.range(2.6, 4.2), t: rng.next() * 10 });
       } else {
-        const x = (leftSide ? -1 : 1) * rng.range(2.15, 3.6);
-        s.deco.push({ id: rng.pick(def.deco), x, t: rng.next() * 10 });
+        const id = rng.pick(def.deco);
+        const far = BUILDINGS.includes(id) ? rng.range(3.6, 4.8) : rng.range(2.15, 3.6);
+        const x = (leftSide ? -1 : 1) * far;
+        s.deco.push({ id, x, t: rng.next() * 10 });
       }
     }
-    if (i % 9 === 0 && def.id !== 'sea') {
+    if (def.id === 'city') {
+      // Street lamps on both sides at a steady rhythm, tall buildings further out.
+      if (i % 6 === 0) s.deco.push({ id: 'lamp', x: i % 12 === 0 ? -2.2 : 2.2, t: 0 });
+      if (i % 5 === 2) s.deco.push({ id: rng.pick(BUILDINGS), x: (rng.chance(0.5) ? -1 : 1) * rng.range(3.6, 4.8), t: rng.next() * 10 });
+    } else if (i % 9 === 0 && def.id !== 'sea') {
       s.deco.push({ id: def.id === 'snow' ? 'pine' : 'tree', x: rng.chance(0.5) ? -4.6 : 4.6, t: 0 });
     }
   }
@@ -198,6 +219,74 @@ function placeDecorations(course, rng) {
   if (def.event === 'snowman') ev.deco.push({ id: 'snowmanBig', x: -2.5, t: 0, event: true });
   if (def.event === 'whale') ev.deco.push({ id: 'whale', x: 3.0, t: 0, event: true });
   if (def.event === 'cow') ev.deco.push({ id: 'cow', x: -2.6, t: 0, event: true, moving: true });
+  if (def.event === 'owl') ev.deco.push({ id: 'owl', x: 2.4, t: 0, event: true });
+}
+
+/**
+ * Jump ramps: 2-3 per course (none when the course is shorter than ~160 segments) on straight stretches, away from the start, the finish,
+ * the event spot, boost pads and obstacles. segment.ramp = { x: 0, w: 2.4 }.
+ */
+function placeRamps(course, rng) {
+  const { segments, goalIndex } = course;
+  const lo = 60;
+  const hi = goalIndex - 60;
+  if (hi - lo < 40) return;
+  const fracs = goalIndex >= 600 ? [0.22, 0.5, 0.78] : [0.3, 0.7];
+  let maxCurve = 0.35;
+  const straight = (i) => {
+    for (let k = i - 6; k <= i + 8; k++) {
+      const s = segments[k];
+      if (!s || Math.abs(s.curve) > maxCurve) return false;
+    }
+    return true;
+  };
+  const clearAround = (i) => {
+    if (Math.abs(i - course.eventIndex) < 16) return false;
+    for (let k = i - 4; k <= i + 4; k++) if (segments[k].boost) return false;
+    return true;
+  };
+  const used = [];
+  const want = fracs.length;
+  const tryPlace = (f) => {
+    const base = Math.floor(lo + (hi - lo) * f);
+    let pick = -1;
+    for (let d = 0; d <= hi - lo && pick < 0; d++) {
+      for (const i of [base + d, base - d]) {
+        if (i < lo || i > hi) continue;
+        if (used.some((u) => Math.abs(u - i) < 40)) continue;
+        if (straight(i) && clearAround(i)) {
+          pick = i;
+          break;
+        }
+      }
+    }
+    if (pick < 0) return;
+    used.push(pick);
+    segments[pick].ramp = { x: 0, w: 2.4 };
+    // Keep the run-up and the landing clear: no obstacles nearby, no items on the ramp itself.
+    for (let k = pick - 6; k <= pick + 10; k++) segments[k].obstacles.length = 0;
+    for (let k = pick - 1; k <= pick + 1; k++) segments[k].items.length = 0;
+    course.counts.ramp++;
+  };
+  for (const f of fracs) tryPlace(f);
+  // Twisty short courses: accept gentler bends rather than going without jumps.
+  for (const mc of [0.8, 1.6, Infinity]) {
+    if (course.counts.ramp >= Math.min(2, want)) break;
+    maxCurve = mc;
+    for (const f of fracs) if (course.counts.ramp < want) tryPlace(f);
+  }
+  // Recount items after clearing so counts stay truthful.
+  let star = 0;
+  let fruit = 0;
+  let obstacle = 0;
+  for (const s of segments) {
+    for (const it of s.items) it.kind === 'star' ? star++ : fruit++;
+    obstacle += s.obstacles.length;
+  }
+  course.counts.star = star;
+  course.counts.fruit = fruit;
+  course.counts.obstacle = obstacle;
+  void rng;
 }
 
 function placeItems(course, rng) {

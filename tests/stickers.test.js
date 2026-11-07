@@ -147,3 +147,10 @@ test('rival level (きょうそう) defaults to normal and only accepts easy/nor
   const old = memoryStorage({ 'buubuu-race.settings.v1': JSON.stringify({ sound: false, speed: 'normal' }) });
   assert.equal(loadSettings(old).rivals, 'normal', 'settings saved before the update still load');
 });
+
+test('settings.ghost defaults to on and only accepts booleans', () => {
+  assert.equal(DEFAULT_SETTINGS.ghost, true);
+  assert.equal(sanitizeSettings({ ghost: false }).ghost, false);
+  assert.equal(sanitizeSettings({ ghost: 'no' }).ghost, true);
+  assert.equal(sanitizeSettings({}).ghost, true);
+});

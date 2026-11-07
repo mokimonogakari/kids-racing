@@ -1,6 +1,21 @@
 // Rival racers: pure, testable driving logic (no drawing, no DOM).
 // A rival is an object moved by stepRival(); the Race owns the list.
-import { SEGMENT_LENGTH, clamp, overlap } from './physics.js';
+import { SEGMENT_LENGTH, clamp, overlap, AIR_TIME } from './physics.js';
+
+/**
+ * Each animal drives a little differently (small, friendly differences):
+ * top: straight-line pace, corner: pace in bends, start: acceleration multiplier for the first
+ * seconds (rabbit's rocket start), jump: pace multiplier for 1 s after landing a jump,
+ * steady: catch-up / hold-back effects halved (a steady, predictable driver).
+ */
+export const ANIMAL_TRAITS = {
+  bear: { top: 1.03, corner: 0.96 },
+  rabbit: { start: 1.6 },
+  cat: { corner: 1.07 },
+  frog: { jump: 1.25 },
+  pig: { steady: true },
+};
+export const ROCKET_SECS = 4;
 
 /**
  * Competition levels (parent setting "きょうそう").
@@ -77,6 +92,14 @@ export function makeRival(animal, slot, level, rng) {
     finishTime: 0,
     ahead: false, // ahead of the player? (tracked by the race for overtake events)
     offroad: false,
+    traits: ANIMAL_TRAITS[animal] || {},
+    driveT: 0, // seconds since this rival got going
+    rocket: false, // set once when a rocket start begins (the race announces it)
+    air: 0,
+    rampSeg: -1,
+    jumped: false, // set when a jump starts (consumed by the race)
+    landed: false, // set when a jump ends (consumed by the race)
+    jumpBoost: 0,
   };
 }
 
@@ -122,6 +145,17 @@ export function stepRival(r, ctx, dt) {
   if (r.reaction > 0) {
     r.reaction -= dt;
     return r;
+  }
+  const tr = r.traits || {};
+  r.driveT = (r.driveT || 0) + dt;
+  if (tr.start && !r.rocket && r.driveT <= dt * 1.5) r.rocket = true;
+  if (r.jumpBoost > 0) r.jumpBoost = Math.max(0, r.jumpBoost - dt);
+  if (r.air > 0) {
+    r.air = Math.max(0, r.air - dt);
+    if (r.air === 0) {
+      r.landed = true;
+      if (tr.jump) r.jumpBoost = 1;
+    }
   }
   const segs = ctx.segments;
   const si = clamp(Math.floor(r.z / SEGMENT_LENGTH), 0, segs.length - 1);
@@ -190,31 +224,34 @@ export function stepRival(r, ctx, dt) {
   const gap = p.z - r.z; // > 0: I am behind the player
   const prog = clamp(r.z / ctx.goalZ, 0, 1);
   const lateK = prog > 0.86 ? level.late : 1;
-  const skillT = max * r.skill;
+  const bend = Math.abs(seg.curve || 0) > 1.5;
+  const skillT = max * r.skill * (bend ? tr.corner || 1 : tr.top || 1);
+  const steadyK = tr.steady ? 0.5 : 1;
   let target;
   if (gap > 0) {
     // Behind: close in when far back, then trail at about `hover` without passing on pace alone.
-    const g = clamp((gap - level.hover) / level.dist, 0, 1) * lateK;
+    const g = clamp((gap - level.hover) / level.dist, 0, 1) * lateK * steadyK;
     target = Math.max(skillT, ref * (1 + level.band * g));
   } else {
     // Ahead: may pull away a little when close, is reeled in when far ahead, never crawls.
-    const g = clamp(-gap / level.dist, 0, 1) * lateK;
+    const g = clamp(-gap / level.dist, 0, 1) * lateK * steadyK;
     const cap = ref * (1 + level.lead - (level.lead + level.hold) * g);
     target = Math.min(skillT, Math.max(skillT * level.floor, cap));
   }
   target *= slow;
+  if (r.jumpBoost > 0) target *= tr.jump || 1;
   if (r.boost > 0) target = Math.max(target, max * 1.4);
   r.offroad = Math.abs(r.x) > 1.05;
   if (r.offroad) target *= 0.7;
   if (r.finished) target = max * 0.55;
-  const accel = preset.accel * 0.95;
+  const accel = preset.accel * 0.95 * (tr.start && r.driveT < ROCKET_SECS ? tr.start : 1);
   if (r.speed < target) r.speed = Math.min(target, r.speed + accel * dt);
   else r.speed = Math.max(target, r.speed - accel * 1.3 * dt);
 
   // ---- lateral: smooth approach to the lane, with a small dead band (no twitching) ----
   const err = r.laneTarget - r.x;
   const steer = Math.abs(err) < 0.02 ? 0 : clamp(err * 3.2, -1, 1);
-  const steerPower = preset.steer * 0.8 * (0.55 + 0.45 * Math.min(1, pct));
+  const steerPower = preset.steer * 0.8 * (0.55 + 0.45 * Math.min(1, pct)) * (r.air > 0 ? 0.5 : 1);
   r.x += steer * steerPower * dt;
   r.x -= (seg.curve || 0) * 0.02 * Math.min(1, pct) * dt; // curves push a little
   r.x += r.vx * dt;
@@ -225,6 +262,13 @@ export function stepRival(r, ctx, dt) {
   // ---- boost pads ----
   if (level.pads && seg.boost && overlap(r.x, RIVAL_W * 0.6, seg.boost.x, seg.boost.w)) {
     r.boost = Math.max(r.boost, 1.4);
+  }
+
+  // ---- jump ramps ----
+  if (seg.ramp && r.air <= 0 && r.rampSeg !== si && pct > 0.45 && overlap(r.x, RIVAL_W, seg.ramp.x, seg.ramp.w)) {
+    r.rampSeg = si;
+    r.air = AIR_TIME;
+    r.jumped = true;
   }
 
   r.z += r.speed * dt;
