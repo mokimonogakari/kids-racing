@@ -432,6 +432,263 @@ function flareTexture(THREE, kind) {
   return tx;
 }
 
+// ---------------------------------------------------------------- M2: extra detail textures
+// Smooth value noise (deterministic) for macro colour variation on grass and ground.
+function hash2(x, z, seed) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263) ^ Math.imul(seed | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, z, seed) {
+  const xi = Math.floor(x);
+  const zi = Math.floor(z);
+  const fx = x - xi;
+  const fz = z - zi;
+  const u = fx * fx * (3 - 2 * fx);
+  const v = fz * fz * (3 - 2 * fz);
+  const a = hash2(xi, zi, seed);
+  const b = hash2(xi + 1, zi, seed);
+  const c = hash2(xi, zi + 1, seed);
+  const d = hash2(xi + 1, zi + 1, seed);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v);
+}
+function fbm(x, z, seed) {
+  return vnoise(x, z, seed) * 0.55 + vnoise(x * 2.1, z * 2.1, seed + 7) * 0.3 + vnoise(x * 4.3, z * 4.3, seed + 13) * 0.15;
+}
+
+/** Two rubber tracks (left/right wheels) across u 0..1 = 3.2 m, streaky along v. RGBA. */
+function tireMarkTexture(THREE, r) {
+  const W = 128;
+  const H = 512;
+  const cv = canvas(W, H);
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  for (const cx of [0.25, 0.75]) {
+    for (let i = 0; i < 260; i++) {
+      const x = (cx + (r() - 0.5) * 0.17) * W;
+      const y = r() * H;
+      const len = 30 + r() * 220;
+      const a = 0.05 + r() * 0.12;
+      g.fillStyle = `rgba(12,12,14,${a.toFixed(3)})`;
+      g.fillRect(x, y, 1 + r() * 2.5, len);
+      if (y + len > H) g.fillRect(x, y - H, 1 + r() * 2.5, len); // wrap
+    }
+  }
+  return makeTex(THREE, cv);
+}
+
+/** Brake marks: dark parallel streaks, faint at v=0 (where braking starts), heavier toward v=1. */
+function brakeMarkTexture(THREE, r) {
+  const W = 128;
+  const H = 256;
+  const cv = canvas(W, H);
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  for (let i = 0; i < 46; i++) {
+    const side = r() < 0.5 ? 0.25 : 0.75;
+    const x = (side + (r() - 0.5) * 0.2) * W;
+    const y0 = r() * H * 0.55;
+    const y1 = Math.min(H, y0 + 60 + r() * 160);
+    const grd = g.createLinearGradient(0, y0, 0, y1);
+    const a = 0.25 + r() * 0.45;
+    grd.addColorStop(0, 'rgba(8,8,10,0)');
+    grd.addColorStop(0.25, `rgba(8,8,10,${a.toFixed(2)})`);
+    grd.addColorStop(0.85, `rgba(8,8,10,${(a * 0.8).toFixed(2)})`);
+    grd.addColorStop(1, 'rgba(8,8,10,0)');
+    g.fillStyle = grd;
+    g.fillRect(x, y0, 2 + r() * 3, y1 - y0);
+  }
+  return makeTex(THREE, cv);
+}
+
+/** Painted kerb with wear: rubber smudges on the road side, chipped paint, grime. */
+function kerbTextureWorn(THREE, r) {
+  const W = 128;
+  const H = 512; // 5 m: red + white
+  const cv = canvas(W, H);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#cf2a2a';
+  g.fillRect(0, 0, W, H / 2);
+  g.fillStyle = '#efefe9';
+  g.fillRect(0, H / 2, W, H / 2);
+  // bevel shading across u (road edge at u=0, outer edge at u=1)
+  const grd = g.createLinearGradient(0, 0, W, 0);
+  grd.addColorStop(0, 'rgba(0,0,0,0.22)');
+  grd.addColorStop(0.12, 'rgba(255,255,255,0.10)');
+  grd.addColorStop(0.5, 'rgba(255,255,255,0.14)');
+  grd.addColorStop(0.88, 'rgba(0,0,0,0.12)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.32)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H);
+  // transverse ridges (rumble)
+  for (let y = 0; y < H; y += 10) {
+    g.fillStyle = 'rgba(0,0,0,0.10)';
+    g.fillRect(0, y, W, 2);
+    g.fillStyle = 'rgba(255,255,255,0.07)';
+    g.fillRect(0, y + 3, W, 2);
+  }
+  // paint chips
+  for (let i = 0; i < 260; i++) {
+    const y = r() * H;
+    g.fillStyle = y < H / 2 ? 'rgba(90,30,30,0.35)' : 'rgba(110,110,105,0.30)';
+    g.fillRect(r() * W, y, 1 + r() * 4, 1 + r() * 3);
+  }
+  // rubber smudges near the road edge (cars run over the inner half)
+  for (let i = 0; i < 160; i++) {
+    const x = Math.pow(r(), 2) * W * 0.65;
+    g.fillStyle = `rgba(15,15,17,${(0.08 + r() * 0.22).toFixed(2)})`;
+    g.fillRect(x, r() * H, 2 + r() * 6, 8 + r() * 40);
+  }
+  // seam between blocks
+  g.fillStyle = 'rgba(0,0,0,0.35)';
+  g.fillRect(0, 0, W, 2);
+  g.fillRect(0, H / 2, W, 2);
+  return makeTex(THREE, cv);
+}
+
+/** Layered rock (strata along u) for cliffs and boulders. */
+function rockTexture(THREE, r) {
+  const W = 256;
+  const H = 256;
+  const cv = canvas(W, H);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#8a837a';
+  g.fillRect(0, 0, W, H);
+  // strata bands (vertical in texture = along u)
+  let x = 0;
+  while (x < W) {
+    const w = 4 + r() * 22;
+    const t = r();
+    g.fillStyle = t < 0.33 ? 'rgba(60,55,50,0.35)' : t < 0.66 ? 'rgba(175,168,155,0.30)' : 'rgba(120,108,92,0.30)';
+    g.fillRect(x, 0, w, H);
+    x += w;
+  }
+  // cracks along the strata
+  g.strokeStyle = 'rgba(30,28,26,0.45)';
+  g.lineWidth = 1.3;
+  for (let i = 0; i < 40; i++) {
+    let cx = r() * W;
+    let cy = r() * H;
+    g.beginPath();
+    g.moveTo(cx, cy);
+    for (let k = 0; k < 5; k++) {
+      cx += (r() - 0.5) * 8;
+      cy += 8 + r() * 18;
+      g.lineTo(cx, cy);
+    }
+    g.stroke();
+  }
+  speckle(g, W, H, 9000, ['rgba(40,38,35,0.35)', 'rgba(200,195,185,0.30)', 'rgba(95,105,70,0.25)'], r, 2);
+  // a little moss
+  for (let i = 0; i < 26; i++) {
+    g.fillStyle = 'rgba(70,95,45,0.22)';
+    g.beginPath();
+    g.ellipse(r() * W, r() * H, 6 + r() * 18, 3 + r() * 8, r() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  return makeTex(THREE, cv);
+}
+
+/** Tree impostor (billboard) silhouette. Crown painted near-white so instance colour tints it. */
+function treeImpostorTexture(THREE, type) {
+  const W = 128;
+  const H = 256;
+  const cv = canvas(W, H);
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  const rr = rng(type.length * 31 + 5);
+  const blob = (x, y, rx, ry, light) => {
+    const grd = g.createRadialGradient(x - rx * 0.35, y - ry * 0.4, 1, x, y, Math.max(rx, ry));
+    grd.addColorStop(0, `rgba(${light},${light},${light},1)`);
+    grd.addColorStop(1, `rgba(${light - 70},${light - 70},${light - 70},1)`);
+    g.fillStyle = grd;
+    g.beginPath();
+    g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    g.fill();
+  };
+  if (type === 'conifer') {
+    g.fillStyle = '#5a3e26';
+    g.fillRect(W / 2 - 5, H - 40, 10, 40);
+    for (let k = 0; k < 3; k++) {
+      const top = 20 + k * 52;
+      const bot = top + 110 - k * 6;
+      const half = 58 - k * 14;
+      const grd = g.createLinearGradient(W / 2 - half, 0, W / 2 + half, 0);
+      grd.addColorStop(0, 'rgb(235,235,235)');
+      grd.addColorStop(0.55, 'rgb(205,205,205)');
+      grd.addColorStop(1, 'rgb(150,150,150)');
+      g.fillStyle = grd;
+      g.beginPath();
+      g.moveTo(W / 2, top - 12);
+      g.lineTo(W / 2 + half, bot - 50);
+      g.lineTo(W / 2 - half, bot - 50);
+      g.closePath();
+      g.fill();
+    }
+  } else if (type === 'palm') {
+    g.strokeStyle = '#7a5a3a';
+    g.lineWidth = 7;
+    g.beginPath();
+    g.moveTo(W / 2 - 6, H);
+    g.quadraticCurveTo(W / 2 - 2, H * 0.55, W / 2 + 10, H * 0.24);
+    g.stroke();
+    g.strokeStyle = 'rgb(220,220,220)';
+    g.lineWidth = 9;
+    g.lineCap = 'round';
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2;
+      const ex = W / 2 + 10 + Math.cos(a) * 54;
+      const ey = H * 0.24 + 18 + Math.abs(Math.sin(a)) * 26;
+      g.beginPath();
+      g.moveTo(W / 2 + 10, H * 0.24);
+      g.quadraticCurveTo((W / 2 + 10 + ex) / 2, H * 0.24 - 14, ex, ey);
+      g.stroke();
+    }
+  } else {
+    g.fillStyle = '#5a3e26';
+    g.fillRect(W / 2 - 7, H - 96, 14, 96);
+    for (let k = 0; k < 9; k++) {
+      blob(W / 2 + (rr() - 0.5) * 60, 70 + (rr() - 0.5) * 70, 26 + rr() * 14, 24 + rr() * 12, 225 + ((rr() * 25) | 0));
+    }
+  }
+  const tx = makeTex(THREE, cv);
+  tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
+  return tx;
+}
+
+/** Red/white bands for the lighthouse. */
+function stripeTexture(THREE, a, b, n = 4) {
+  const cv = canvas(16, 128);
+  const g = cv.getContext('2d');
+  for (let i = 0; i < n * 2; i++) {
+    g.fillStyle = i % 2 ? b : a;
+    g.fillRect(0, (i * 128) / (n * 2), 16, 128 / (n * 2) + 1);
+  }
+  return makeTex(THREE, cv);
+}
+
+/** Flag cloth texture. */
+function flagTexture(THREE, color, checker = false) {
+  const cv = canvas(64, 48);
+  const g = cv.getContext('2d');
+  if (checker) {
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 6; x++) {
+      g.fillStyle = (x + y) % 2 ? '#111' : '#f4f4f0';
+      g.fillRect(x * 11, y * 12, 11, 12);
+    }
+  } else {
+    g.fillStyle = color;
+    g.fillRect(0, 0, 64, 48);
+  }
+  const grd = g.createLinearGradient(0, 0, 64, 0);
+  grd.addColorStop(0, 'rgba(0,0,0,0.0)');
+  grd.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.18)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 48);
+  return makeTex(THREE, cv);
+}
+
 function shadeHex(hex, k) {
   const n = parseInt(hex.slice(1), 16);
   let rr = (n >> 16) & 255;
@@ -827,12 +1084,37 @@ export function buildWorld(THREE, track, opts = {}) {
     metalness: 0.0,
     envMapIntensity: 0.35,
   }));
-  const kerbMat = keep(new THREE.MeshStandardMaterial({ map: keep(kerbTexture(THREE)), roughness: 0.55 }));
+  const kerbMat = keep(new THREE.MeshStandardMaterial({ map: keep(kerbTextureWorn(THREE, rng(991))), roughness: 0.5 }));
+  void kerbTexture;
   const grassMap = keep(grassTexture(THREE, r, P.grass));
-  const grassMat = keep(new THREE.MeshStandardMaterial({ map: grassMap, roughness: 1, envMapIntensity: 0.5 }));
+  const grassMat = keep(new THREE.MeshStandardMaterial({ map: grassMap, roughness: 1, envMapIntensity: 0.5, vertexColors: true }));
   const groundMap = keep(groundTexture(THREE, r, P.ground));
   groundMap.repeat.set(70, 70);
-  const groundMat = keep(new THREE.MeshStandardMaterial({ map: groundMap, roughness: 1, envMapIntensity: 0.5 }));
+  const groundMat = keep(new THREE.MeshStandardMaterial({ map: groundMap, roughness: 1, envMapIntensity: 0.5, vertexColors: true }));
+  // Macro colour variation (patches, drier/yellower areas, darker damp hollows) baked into vertex colours.
+  const seedN = id === 'mountain' ? 41 : 17;
+  const groundTint = (x, z, far = 0) => {
+    const n1 = fbm(x / 75, z / 75, seedN);
+    const n2 = fbm(x / 210 + 3.1, z / 210 - 1.7, seedN + 5);
+    const n3 = vnoise(x / 22, z / 22, seedN + 9);
+    const bright = 0.6 + 0.62 * n1 + 0.14 * (n3 - 0.5);
+    const dry = clamp((n2 - 0.42) * 2.4 + far * 0.4, 0, 1);
+    return [bright * (1 + 0.3 * dry), bright * (1 + 0.06 * dry), bright * (1 - 0.26 * dry)];
+  };
+  const tintGeo = (geo, farFn = null) => {
+    const pa = geo.attributes.position;
+    const col = new Float32Array(pa.count * 3);
+    for (let v = 0; v < pa.count; v++) {
+      const x = pa.getX(v);
+      const z = pa.getZ(v);
+      const c = groundTint(x, z, farFn ? farFn(x, z) : 0);
+      col[v * 3] = c[0];
+      col[v * 3 + 1] = c[1];
+      col[v * 3 + 2] = c[2];
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return geo;
+  };
   const gravelMat = keep(new THREE.MeshStandardMaterial({
     map: keep(gravelTexture(THREE, r)), roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }));
@@ -870,6 +1152,60 @@ export function buildWorld(THREE, track, opts = {}) {
     { name: 'road' },
   );
 
+  // ---------------- rubber on the racing line + brake marks before corners
+  const lineX = new Float32Array(N);
+  {
+    const win = 45;
+    let acc = 0;
+    for (let k = -win; k <= win; k++) acc += A.cs[(k + N) % N];
+    for (let i = 0; i < N; i++) {
+      lineX[i] = clamp((acc / (2 * win + 1)) * 260, -4.4, 4.4);
+      acc += A.cs[(i + win + 1) % N] - A.cs[(i - win + N) % N];
+    }
+  }
+  const crownH = (x) => 0.015 * (1 - Math.min(1, Math.abs(x) / ROAD_HALF));
+  {
+    const markMat = keep(new THREE.MeshStandardMaterial({
+      map: keep(tireMarkTexture(THREE, r)), transparent: true, depthWrite: false, roughness: 0.75,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, opacity: 0.6,
+    }));
+    addMesh(
+      ribbon(THREE, track, {
+        step: 2,
+        cols: (i) => {
+          const xl = lineX[i];
+          return [{ x: xl - 1.6, h: crownH(xl - 1.6) + 0.006 }, { x: xl, h: crownH(xl) + 0.006 }, { x: xl + 1.6, h: crownH(xl + 1.6) + 0.006 }];
+        },
+        u: (c) => c / 2,
+        vScale: 1 / 14,
+      }),
+      markMat,
+      { name: 'rubber' },
+    );
+    const brakeMat = keep(new THREE.MeshStandardMaterial({
+      map: keep(brakeMarkTexture(THREE, r)), transparent: true, depthWrite: false, roughness: 0.7,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    }));
+    const parts = [];
+    for (const c of A.corners) {
+      if (c.peak < 1 / 260) continue;
+      for (let k = 0; k < 2; k++) {
+        const len = 55 + r() * 35;
+        const s0 = c.a - 8 - len - k * (8 + r() * 14);
+        const off = (r() - 0.5) * 1.2;
+        parts.push(ribbon(THREE, track, {
+          s0, s1: s0 + len, step: 2, closed: false,
+          cols: (i) => {
+            const xl = lineX[i] * 0.6 + off;
+            return [{ x: xl - 1.6, h: crownH(xl - 1.6) + 0.008 }, { x: xl + 1.6, h: crownH(xl + 1.6) + 0.008 }];
+          },
+          vScale: 1 / len,
+        }));
+      }
+    }
+    if (parts.length) addMesh(mergeGeos(THREE, parts), brakeMat, { name: 'brakemarks' });
+  }
+
   // ---------------- corner sets: kerbs, gravel, tyre walls
   const PIT_A = -190; // pit straight around s=0
   const PIT_B = 140;
@@ -891,12 +1227,15 @@ export function buildWorld(THREE, track, opts = {}) {
         ribbon(THREE, track, {
           s0: a0, s1: a0 + l0, step: 1, closed: false,
           cols: () => {
+            // stepped kerb: small lip at the road edge, raised crown, bevel back down to the grass
             const x0 = side * ROAD_HALF;
+            const xa = side * (ROAD_HALF + 0.06);
             const x1 = side * (ROAD_HALF + 0.75);
+            const xb = side * (ROAD_HALF + 1.4);
             const x2 = side * (ROAD_HALF + 1.5);
-            return [{ x: x0, h: 0.02 }, { x: x1, h: 0.11 }, { x: x2, h: 0.0 }];
+            return [{ x: x0, h: 0.0 }, { x: xa, h: 0.065 }, { x: x1, h: 0.11 }, { x: xb, h: 0.07 }, { x: x2, h: -0.01 }];
           },
-          u: (k) => k / 2,
+          u: (k) => [0, 0.04, 0.5, 0.93, 1][k],
           vScale: 1 / 5,
         }),
       );
@@ -974,16 +1313,44 @@ export function buildWorld(THREE, track, opts = {}) {
       }),
       grassMat,
       { name: side < 0 ? 'grassL' : 'grassR' },
-    );
+    ).userData.noBatch = true;
   }
+  for (const c of group.children) if (c.userData.noBatch && c.material === grassMat) tintGeo(c.geometry);
 
+  // approximate terrain height at lateral offset x (matches the run-off/embankment profile)
+  const groundAt = (i, x) => {
+    const smp = S[((i % N) + N) % N];
+    const ax = Math.abs(x);
+    const ty = terrainY(((i % N) + N) % N);
+    const near = smp.pos[1] - 0.22;
+    const mid = lerp(smp.pos[1] - 0.4, ty, 0.55);
+    if (ax <= ROAD_HALF + 20) return near;
+    if (ax <= ROAD_HALF + 40) return lerp(near, mid, (ax - ROAD_HALF - 20) / 20);
+    if (ax <= ROAD_HALF + 70) return lerp(mid, ty, (ax - ROAD_HALF - 40) / 30);
+    return ty;
+  };
+  const roomOut = (i, side, dist) => {
+    // is there free space `dist` metres out on this side (no other part of the circuit)?
+    const smp = S[((i % N) + N) % N];
+    for (let m = 20; m <= dist; m += 10) {
+      const nr = A.nearest(smp.pos[0] + smp.nor[0] * side * m, smp.pos[2] + smp.nor[2] * side * m);
+      if (nr.i < 0) continue;
+      let di = Math.abs(nr.i - i);
+      di = Math.min(di, N - di);
+      if (di > 60 && nr.d < 24) return false;
+    }
+    return true;
+  };
   // ---------------- base ground / coastline / sea
   const landR = A.rad + 260;
   if (P.sea) {
-    const land = new THREE.Mesh(keep(new THREE.CircleGeometry(landR, 96)), groundMat);
-    land.rotation.x = -Math.PI / 2;
-    land.position.set(A.cx, groundY - 0.05, A.cz);
+    const landGeo = keep(new THREE.RingGeometry(0.5, landR, 128, 40));
+    landGeo.rotateX(-Math.PI / 2);
+    landGeo.translate(A.cx, groundY - 0.05, A.cz);
+    tintGeo(landGeo, (x, z) => clamp((Math.hypot(x - A.cx, z - A.cz) - A.rad) / 200, 0, 1));
+    const land = new THREE.Mesh(landGeo, groundMat);
     land.receiveShadow = true;
+    land.userData.noBatch = true;
     group.add(land);
     const sandMap = keep(sandTexture(THREE, r));
     sandMap.repeat.set(60, 4);
@@ -1031,26 +1398,200 @@ export function buildWorld(THREE, track, opts = {}) {
       group.add(isl);
     }
   } else {
-    const ground = new THREE.Mesh(keep(new THREE.PlaneGeometry(9000, 9000, 1, 1)), groundMat);
+    const gGeo = keep(new THREE.PlaneGeometry(9000, 9000, 120, 120));
     groundMap.repeat.set(220, 220);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(A.cx, groundY - 0.05, A.cz);
+    gGeo.rotateX(-Math.PI / 2);
+    gGeo.translate(A.cx, groundY - 0.05, A.cz);
+    tintGeo(gGeo, (x, z) => clamp((Math.hypot(x - A.cx, z - A.cz) - A.rad) / 600, 0, 1));
+    const ground = new THREE.Mesh(gGeo, groundMat);
     ground.receiveShadow = true;
+    ground.userData.noBatch = true;
     group.add(ground);
+  }
+
+  // ---------------- M2: coast town across the bay + lighthouse / mountain cliffs + boulders
+  const rockMat = keep(new THREE.MeshStandardMaterial({ map: keep(rockTexture(THREE, r)), roughness: 0.95, flatShading: true }));
+  if (P.sea) {
+    const aTown = Math.PI / 2 - 0.6; // the open-sea side of the horizon ring
+    const half = 0.42;
+    const rIn = landR + 430;
+    const rOut = landR + 1700;
+    const shore = keep(new THREE.RingGeometry(rIn, rOut, 48, 2, -(aTown + half), half * 2));
+    shore.rotateX(-Math.PI / 2);
+    shore.translate(A.cx, groundY - 1.2, A.cz);
+    tintGeo(shore, () => 0.6);
+    const shoreM = new THREE.Mesh(shore, groundMat);
+    shoreM.userData.noBatch = true;
+    group.add(shoreM);
+    const sandRing = keep(new THREE.RingGeometry(rIn - 40, rIn + 6, 48, 1, -(aTown + half), half * 2));
+    sandRing.rotateX(-Math.PI / 2);
+    sandRing.translate(A.cx, groundY - 1.4, A.cz);
+    group.add(new THREE.Mesh(sandRing, keep(new THREE.MeshStandardMaterial({ color: 0xe2cf9f, roughness: 1 }))));
+    // buildings: low pastel houses on the waterfront, taller blocks behind
+    const facade = (() => {
+      const cv = canvas(64, 128);
+      const g = cv.getContext('2d');
+      g.fillStyle = '#f4f1ea';
+      g.fillRect(0, 0, 64, 128);
+      for (let y = 8; y < 124; y += 12) for (let x = 6; x < 60; x += 12) {
+        g.fillStyle = r() < 0.15 ? '#f6e7b0' : '#5c7690';
+        g.fillRect(x, y, 7, 7);
+      }
+      return makeTex(THREE, cv);
+    })();
+    keep(facade);
+    const bGeo = keep(new THREE.BoxGeometry(1, 1, 1));
+    bGeo.translate(0, 0.5, 0);
+    const bMat = keep(new THREE.MeshStandardMaterial({ map: facade, roughness: 0.7 }));
+    const nB = quality >= 1 ? 340 : 180;
+    const town = new THREE.InstancedMesh(bGeo, bMat, nB);
+    const d = new THREE.Object3D();
+    const colB = new THREE.Color();
+    const pal = [0xffffff, 0xf3e3c3, 0xdfe9f3, 0xf6d5c8, 0xe8e2d0, 0xcfe0d4, 0xbfc6cf];
+    for (let k = 0; k < nB; k++) {
+      const depth = Math.pow(r(), 0.8);
+      const rr = rIn + 30 + depth * 520;
+      const a = aTown + (r() - 0.5) * 2 * half * (0.92 - depth * 0.25);
+      const tall = depth > 0.45 && r() < 0.45;
+      const h = tall ? 22 + r() * 55 : 7 + r() * 10;
+      const w = tall ? 14 + r() * 18 : 9 + r() * 10;
+      d.position.set(A.cx + Math.cos(a) * rr, groundY - 1.2, A.cz + Math.sin(a) * rr);
+      d.rotation.set(0, -a + (r() - 0.5) * 0.3, 0);
+      d.scale.set(w, h, 8 + r() * 10);
+      d.updateMatrix();
+      town.setMatrixAt(k, d.matrix);
+      town.setColorAt(k, colB.setHex(pal[(r() * pal.length) | 0]));
+    }
+    town.name = 'town';
+    group.add(town);
+    // lighthouse on the beach, looking toward the town
+    {
+      const g = new THREE.Group();
+      const pts = [];
+      for (let t = 0; t <= 8; t++) pts.push(new THREE.Vector2(3.0 - t * 0.12, t * 3.2));
+      const towerMat = keep(new THREE.MeshStandardMaterial({ map: keep(stripeTexture(THREE, '#f4f4f0', '#d42a2a', 3)), roughness: 0.6 }));
+      const tower = new THREE.Mesh(keep(new THREE.LatheGeometry(pts, 20)), towerMat);
+      tower.castShadow = true;
+      g.add(tower);
+      const gallery = new THREE.Mesh(keep(new THREE.CylinderGeometry(2.6, 2.6, 0.35, 20)), darkSteel);
+      gallery.position.y = 25.8;
+      g.add(gallery);
+      const lamp = new THREE.Mesh(keep(new THREE.CylinderGeometry(1.4, 1.4, 2.4, 16)), keep(new THREE.MeshStandardMaterial({
+        color: 0xfff3c4, emissive: 0xffe08a, emissiveIntensity: 1.4, roughness: 0.1, metalness: 0.2,
+      })));
+      lamp.position.y = 27.2;
+      g.add(lamp);
+      const cap = new THREE.Mesh(keep(new THREE.ConeGeometry(1.9, 2.0, 16)), keep(new THREE.MeshStandardMaterial({ color: 0xb81f1f, roughness: 0.5 })));
+      cap.position.y = 29.4;
+      g.add(cap);
+      const hut = new THREE.Mesh(keep(new THREE.BoxGeometry(6, 3.2, 5)), whitePaint);
+      hut.position.set(4.5, 1.6, 0);
+      g.add(hut);
+      const a = aTown + 0.32;
+      g.position.set(A.cx + Math.cos(a) * (landR + 28), groundY - 0.9, A.cz + Math.sin(a) * (landR + 28));
+      group.add(g);
+    }
+  } else {
+    // boulders scattered outside the barriers
+    const bGeo = keep(new THREE.IcosahedronGeometry(1, 1));
+    {
+      const pa = bGeo.attributes.position;
+      for (let v = 0; v < pa.count; v++) {
+        const x = pa.getX(v);
+        const y = pa.getY(v);
+        const z = pa.getZ(v);
+        const k = 0.75 + 0.45 * hash2(Math.round(x * 9), Math.round(y * 9) + Math.round(z * 9) * 31, 5);
+        pa.setXYZ(v, x * k * 1.25, y * k * 0.8, z * k);
+      }
+      bGeo.computeVertexNormals();
+    }
+    const nR = quality >= 1 ? 260 : 140;
+    const rocks = new THREE.InstancedMesh(bGeo, rockMat, nR);
+    const d = new THREE.Object3D();
+    const cR = new THREE.Color();
+    let placed = 0;
+    for (let tries = 0; tries < nR * 20 && placed < nR; tries++) {
+      const i = (r() * N) | 0;
+      const side = r() < 0.5 ? -1 : 1;
+      const dist = ROAD_HALF + 26 + Math.pow(r(), 1.6) * 130;
+      const smp = S[i];
+      const x = smp.pos[0] + smp.nor[0] * side * dist;
+      const z = smp.pos[2] + smp.nor[2] * side * dist;
+      const nr = A.nearest(x, z);
+      if (nr.i < 0 || nr.d < ROAD_HALF + 24) continue;
+      const sc = 0.7 + Math.pow(r(), 2.2) * 4.5;
+      d.position.set(x, groundAt(nr.i, nr.d) - sc * 0.25, z);
+      d.rotation.set(r() * 0.4, r() * 6.28, r() * 0.4);
+      d.scale.setScalar(sc);
+      d.updateMatrix();
+      rocks.setMatrixAt(placed, d.matrix);
+      rocks.setColorAt(placed, cR.setScalar(0.8 + r() * 0.35));
+      placed++;
+    }
+    rocks.count = placed;
+    rocks.castShadow = true;
+    rocks.receiveShadow = true;
+    rocks.name = 'boulders';
+    group.add(rocks);
+    // rock cliffs rising behind the run-off on a few sections
+    const cliffParts = [];
+    let made = 0;
+    for (let i0 = 0; i0 < N && made < 6; i0 += 37) {
+      if (inPit(i0)) continue;
+      const len = 140 + ((r() * 120) | 0);
+      for (const side of [-1, 1]) {
+        let ok = true;
+        for (let k = 0; k <= len && ok; k += 20) ok = roomOut(i0 + k, side, 110);
+        if (!ok) continue;
+        const base = side * (ROAD_HALF + 52);
+        const seedC = made * 13 + 3;
+        cliffParts.push(ribbon(THREE, track, {
+          s0: i0, s1: i0 + len, step: 3, closed: false,
+          cols: (i, smp, sr) => {
+            const t = clamp(Math.min(sr - i0, i0 + len - sr) / 30, 0, 1);
+            const n1 = fbm(sr / 18, seedC, seedC);
+            const n2 = fbm(sr / 9 + 5, seedC + 1, seedC);
+            const n3 = vnoise(sr / 4.5, seedC * 3, seedC + 2);
+            const H = (8 + 26 * n1 + 6 * n3) * (0.2 + 0.8 * t);
+            const ty = groundAt(i, base) - 2.5;
+            return [
+              { x: base, y: ty },
+              { x: base + side * (1 + 3 * n2), y: ty + H * 0.3 },
+              { x: base + side * (0.2 + 3.5 * n3), y: ty + H * 0.62 },
+              { x: base + side * (2 + 3 * n2), y: ty + H * 0.9 },
+              { x: base + side * (5 + 3 * n3), y: ty + H },
+              { x: base + side * (16 + 6 * n1), y: ty + H * 0.45 },
+              { x: base + side * 30, y: ty - 4 },
+            ];
+          },
+          u: (c) => [0, 0.45, 0.9, 1.3, 1.5, 1.9, 2.3][c],
+          vScale: 1 / 14,
+        }));
+        made++;
+        i0 += len;
+        break;
+      }
+    }
+    if (cliffParts.length) {
+      const cm = addMesh(mergeGeos(THREE, cliffParts), rockMat, { cast: true, name: 'cliffs' });
+      cm.material = keep(rockMat.clone());
+      cm.material.side = THREE.DoubleSide;
+      cm.material.flatShading = false;
+    }
   }
 
   // ---------------- distant mountain ring (both venues; bigger on mountain)
   {
-    const seg = 220;
-    const rings = 12;
+    const seg = 360;
+    const rings = 20;
     const R0 = Math.max(A.rad + (P.sea ? 2300 : 1300), 1600);
     const R1 = R0 + (P.sea ? 1700 : 2600);
     const hMax = P.sea ? 380 : 1050;
     const pos = [];
     const col = [];
     const idx = [];
-    const cForest = new THREE.Color(P.sea ? 0x4f7a50 : 0x3f6e3c);
-    const cMeadow = new THREE.Color(P.sea ? 0x5f8a50 : 0x4f7a3f);
+    const cForest = new THREE.Color(P.sea ? 0x3f7a3c : 0x2c6a2a);
+    const cMeadow = new THREE.Color(P.sea ? 0x5a9348 : 0x4a8a36);
     const cRock = new THREE.Color(0x8d8780);
     const cSnow = new THREE.Color(0xf2f5f8);
     const ph = [r() * 6, r() * 6, r() * 6, r() * 6];
@@ -1076,9 +1617,9 @@ export function buildWorld(THREE, track, opts = {}) {
         if (fr === 0) hh = 0;
         pos.push(A.cx + Math.cos(a) * R, groundY - 4 + hh, A.cz + Math.sin(a) * R);
         const hn = hh / hMax;
-        if (!P.sea && hn > 0.62) tmpC.copy(cRock).lerp(cSnow, clamp((hn - 0.62) / 0.12, 0, 1));
-        else if (hn > 0.34) tmpC.copy(cForest).lerp(cRock, clamp((hn - 0.34) / 0.28, 0, 1));
-        else tmpC.copy(cMeadow).lerp(cForest, clamp(hn / 0.34, 0, 1));
+        if (!P.sea && hn > 0.8) tmpC.copy(cRock).lerp(cSnow, clamp((hn - 0.8) / 0.08, 0, 1));
+        else if (hn > 0.58) tmpC.copy(cForest).lerp(cRock, clamp((hn - 0.58) / 0.22, 0, 1));
+        else tmpC.copy(cMeadow).lerp(cForest, clamp(hn / 0.58, 0, 1));
         col.push(tmpC.r, tmpC.g, tmpC.b, fr);
       }
     }
@@ -1097,12 +1638,23 @@ export function buildWorld(THREE, track, opts = {}) {
     const sd = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - P.sunElev), THREE.MathUtils.degToRad(P.sunAzim));
     const nrm = geo.attributes.normal;
     const out = new Float32Array(nrm.count * 3);
+    const pz = geo.attributes.position;
+    const rockC = new THREE.Color(0x8a7c68);
+    const darkRock = new THREE.Color(0x5e5a55);
     for (let v = 0; v < nrm.count; v++) {
       const ndl = Math.max(0, nrm.getX(v) * sd.x + nrm.getY(v) * sd.y + nrm.getZ(v) * sd.z);
       const sky = 0.5 + 0.5 * nrm.getY(v);
-      const lit = 0.42 + 0.38 * sky + 0.55 * ndl;
-      tmpC.setRGB(col[v * 4] * lit, col[v * 4 + 1] * lit, col[v * 4 + 2] * lit);
-      tmpC.lerp(fogC, lerp(0.22, 0.55, col[v * 4 + 3]));
+      const lit = 0.5 + 0.38 * sky + 0.62 * ndl;
+      // steep faces show bare rock (streaky), gentle slopes keep their vegetation colour
+      const steep = clamp((0.86 - nrm.getY(v)) / 0.3, 0, 1);
+      const nz = fbm(pz.getX(v) / 90, pz.getZ(v) / 90 + pz.getY(v) / 60, 71);
+      const rockAmt = clamp(steep * (0.55 + 0.7 * nz) - (P.sea ? 0.25 : 0), 0, 1);
+      const base = new THREE.Color(col[v * 4], col[v * 4 + 1], col[v * 4 + 2]);
+      const isSnow = !P.sea && base.r > 0.8;
+      if (!isSnow) base.lerp(nz > 0.55 ? darkRock : rockC, rockAmt * (P.sea ? 0.45 : 0.6));
+      base.multiplyScalar(0.88 + 0.24 * nz);
+      tmpC.setRGB(base.r * lit, base.g * lit, base.b * lit);
+      tmpC.lerp(fogC, lerp(0.08, 0.42, col[v * 4 + 3]));
       out[v * 3] = tmpC.r;
       out[v * 3 + 1] = tmpC.g;
       out[v * 3 + 2] = tmpC.b;
@@ -1354,6 +1906,206 @@ export function buildWorld(THREE, track, opts = {}) {
     if (postParts.length) addMesh(mergeGeos(THREE, postParts), darkSteel, { cast: false, name: 'railposts' });
   }
 
+  // ---------------- trackside structures: marshal posts, TV camera towers, footbridge
+  let bridgeAt = -1;
+  {
+    const orange = keep(new THREE.MeshStandardMaterial({ color: 0xf07c1e, roughness: 0.55 }));
+    const glassDark = keep(new THREE.MeshStandardMaterial({ color: 0x1d2a36, roughness: 0.15, metalness: 0.6 }));
+    const flagY = keep(new THREE.MeshStandardMaterial({ map: keep(flagTexture(THREE, '#ffd21f')), roughness: 0.8, side: THREE.DoubleSide }));
+    const flagG = keep(new THREE.MeshStandardMaterial({ map: keep(flagTexture(THREE, '#1f9d3a')), roughness: 0.8, side: THREE.DoubleSide }));
+    const flagC = keep(new THREE.MeshStandardMaterial({ map: keep(flagTexture(THREE, '', true)), roughness: 0.8, side: THREE.DoubleSide }));
+    // a flag: gently waving cloth (static shape)
+    const flagGeo = keep(new THREE.PlaneGeometry(1.2, 0.8, 8, 1));
+    {
+      const pa = flagGeo.attributes.position;
+      for (let v = 0; v < pa.count; v++) {
+        const x = pa.getX(v) + 0.6;
+        pa.setXYZ(v, x, pa.getY(v) - x * 0.06, Math.sin(x * 4.2) * 0.09 * x);
+      }
+      flagGeo.computeVertexNormals();
+    }
+    const poleGeo = keep(new THREE.CylinderGeometry(0.04, 0.04, 3.2, 6));
+    const cabinGeo = keep(new THREE.BoxGeometry(2.4, 2.2, 2.0));
+    const bandGeo = keep(new THREE.BoxGeometry(2.42, 0.55, 2.02));
+    const roofGeo = keep(new THREE.BoxGeometry(2.9, 0.18, 2.5));
+    const legGeo = keep(new THREE.BoxGeometry(0.16, 1.6, 0.16));
+    const makePost = (flagMat) => {
+      const g = new THREE.Group();
+      for (const [lx, lz] of [[-1, -0.8], [1, -0.8], [-1, 0.8], [1, 0.8]]) {
+        const l = new THREE.Mesh(legGeo, darkSteel);
+        l.position.set(lx, 0.8, lz);
+        g.add(l);
+      }
+      const cab = new THREE.Mesh(cabinGeo, orange);
+      cab.position.y = 2.7;
+      cab.castShadow = true;
+      g.add(cab);
+      const band = new THREE.Mesh(bandGeo, glassDark);
+      band.position.y = 3.05;
+      g.add(band);
+      const roof = new THREE.Mesh(roofGeo, whitePaint);
+      roof.position.y = 3.9;
+      roof.castShadow = true;
+      g.add(roof);
+      const pole = new THREE.Mesh(poleGeo, steelMat);
+      pole.position.set(1.35, 3.0, -0.9);
+      g.add(pole);
+      const fl = new THREE.Mesh(flagGeo, flagMat);
+      fl.position.set(1.37, 4.15, -0.9);
+      fl.rotation.y = Math.PI / 2;
+      g.add(fl);
+      return g;
+    };
+    // one marshal post before every corner, on the outside, behind the barrier
+    let n = 0;
+    for (const c of A.corners) {
+      const out = -c.dir;
+      const i = ((c.a - 25) % N + N) % N;
+      if (inPit(i) && out === -1) continue;
+      if (!roomOut(i, out, 40)) continue;
+      const g = makePost(n % 3 === 2 ? flagG : flagY);
+      const x = out * (ROAD_HALF + 25);
+      placeAt(g, track, i, x, 0, { yaw: out > 0 ? -Math.PI / 2 : Math.PI / 2 });
+      g.position.y = groundAt(i, x);
+      group.add(g);
+      n++;
+    }
+    // a post with the chequered flag at the finish line (outside, right)
+    {
+      const g = makePost(flagC);
+      placeAt(g, track, 6, ROAD_HALF + 25, 0, { yaw: -Math.PI / 2 });
+      g.position.y = groundAt(6, ROAD_HALF + 25);
+      group.add(g);
+    }
+
+    // TV camera towers at the two biggest corners
+    const towerGeo = keep(new THREE.BoxGeometry(0.9, 14, 0.9));
+    const braceGeo = keep(new THREE.BoxGeometry(0.12, 4.2, 0.12));
+    const platGeo = keep(new THREE.BoxGeometry(3.2, 0.25, 3.2));
+    const railGeo = keep(new THREE.BoxGeometry(3.2, 0.9, 0.06));
+    const camGeo = keep(new THREE.BoxGeometry(0.5, 0.45, 1.1));
+    const lensGeo = keep(new THREE.CylinderGeometry(0.16, 0.2, 0.5, 10));
+    const umbGeo = keep(new THREE.ConeGeometry(1.5, 0.6, 12, 1, true));
+    const umbMat = keep(new THREE.MeshStandardMaterial({ color: 0x1b3a8a, roughness: 0.7, side: THREE.DoubleSide }));
+    for (const c of [...A.corners].sort((a, b) => b.peak - a.peak).slice(0, 2)) {
+      const out = -c.dir;
+      const i = c.peakI;
+      if (!roomOut(i, out, 50)) continue;
+      const g = new THREE.Group();
+      const t = new THREE.Mesh(towerGeo, darkSteel);
+      t.position.y = 7;
+      t.castShadow = true;
+      g.add(t);
+      for (let k = 0; k < 3; k++) {
+        const b = new THREE.Mesh(braceGeo, steelMat);
+        b.position.set(0.55, 2.5 + k * 4.3, 0);
+        b.rotation.z = 0.5;
+        g.add(b);
+      }
+      const plat = new THREE.Mesh(platGeo, steelMat);
+      plat.position.y = 14;
+      plat.castShadow = true;
+      g.add(plat);
+      for (const [rx, rz, ry] of [[0, -1.57, 0], [0, 1.57, 0], [-1.57, 0, Math.PI / 2], [1.57, 0, Math.PI / 2]]) {
+        const rl = new THREE.Mesh(railGeo, steelMat);
+        rl.position.set(rx, 14.55, rz);
+        rl.rotation.y = ry;
+        g.add(rl);
+      }
+      const cam = new THREE.Mesh(camGeo, darkSteel);
+      cam.position.set(0, 15.0, 0.2);
+      g.add(cam);
+      const lens = new THREE.Mesh(lensGeo, glassDark);
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(0, 15.0, 0.95);
+      g.add(lens);
+      const umb = new THREE.Mesh(umbGeo, umbMat);
+      umb.position.set(0, 16.6, 0);
+      g.add(umb);
+      const x = out * (ROAD_HALF + 33);
+      placeAt(g, track, i, x, 0, { yaw: out > 0 ? -Math.PI / 2 : Math.PI / 2 });
+      g.position.y = groundAt(i, x) - 0.2;
+      group.add(g);
+    }
+
+    // footbridge across the longest clean straight away from the pits
+    {
+      let best = -1;
+      let bestScore = -Infinity;
+      for (let i = 0; i < N; i += 10) {
+        if (inPit(i) || inPit(i + 120) || inPit(i - 120)) continue;
+        let sc = 0;
+        for (let k = -50; k <= 50; k += 5) sc -= Math.abs(A.cs[((i + k) % N + N) % N]);
+        if (!roomOut(i, 1, 46) || !roomOut(i, -1, 46)) continue;
+        sc -= Math.abs(S[i].up[0]) + Math.abs(S[i].up[2]); // prefer flat
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = i;
+        }
+      }
+      if (best >= 0) {
+        bridgeAt = best;
+        const span = 2 * (ROAD_HALF + 30);
+        const deckY = 7.4;
+        const g = new THREE.Group();
+        const deck = new THREE.Mesh(keep(new THREE.BoxGeometry(span, 0.5, 3.4)), plainConcrete);
+        deck.position.y = deckY;
+        deck.castShadow = true;
+        g.add(deck);
+        const sideMats = [
+          darkSteel, darkSteel, darkSteel, darkSteel,
+          keep(new THREE.MeshStandardMaterial({ map: keep(textPanel(THREE, 'BUUBUU  GRAND  PRIX', { bg: '#c81e2d', accent: '#ffffff', w: 1024 })), roughness: 0.5 })),
+          keep(new THREE.MeshStandardMaterial({ map: keep(textPanel(THREE, 'BUUBUU  RACE', { bg: '#1b3a8a', w: 1024 })), roughness: 0.5 })),
+        ];
+        const banner = new THREE.Mesh(keep(new THREE.BoxGeometry(2 * ROAD_HALF + 10, 1.5, 3.6)), sideMats);
+        banner.position.y = deckY - 1.0;
+        g.add(banner);
+        // truss sides: top chord, posts and diagonals
+        const chordGeo = keep(new THREE.BoxGeometry(span, 0.18, 0.18));
+        const postGeo2 = keep(new THREE.BoxGeometry(0.14, 1.9, 0.14));
+        const diagGeo = keep(new THREE.BoxGeometry(0.1, 2.6, 0.1));
+        for (const z of [-1.6, 1.6]) {
+          const ch = new THREE.Mesh(chordGeo, whitePaint);
+          ch.position.set(0, deckY + 2.0, z);
+          g.add(ch);
+          for (let x = -span / 2; x <= span / 2 + 0.01; x += 3) {
+            const p = new THREE.Mesh(postGeo2, whitePaint);
+            p.position.set(x, deckY + 1.1, z);
+            g.add(p);
+            if (x < span / 2 - 0.1) {
+              const d = new THREE.Mesh(diagGeo, whitePaint);
+              d.position.set(x + 1.5, deckY + 1.1, z);
+              d.rotation.z = (x / 3) % 2 ? 0.9 : -0.9;
+              g.add(d);
+            }
+          }
+        }
+        const roofB = new THREE.Mesh(keep(new THREE.BoxGeometry(span, 0.12, 3.8)), keep(new THREE.MeshStandardMaterial({
+          color: 0x9fc4e0, roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0.55,
+        })));
+        roofB.position.y = deckY + 2.2;
+        g.add(roofB);
+        // stair towers
+        const tw = keep(new THREE.BoxGeometry(4.5, 14, 4.5));
+        for (const sx of [-1, 1]) {
+          const t = new THREE.Mesh(tw, concreteMat);
+          t.position.set(sx * (span / 2 + 2.0), deckY + 2.8 - 7, 0);
+          t.castShadow = true;
+          g.add(t);
+          const cap = new THREE.Mesh(keep(new THREE.BoxGeometry(5.2, 0.4, 5.2)), roofMatB());
+          cap.position.set(sx * (span / 2 + 2.0), deckY + 2.8, 0);
+          g.add(cap);
+        }
+        placeAt(g, track, best, 0, 0);
+        g.position.y = S[best].pos[1];
+        group.add(g);
+      }
+    }
+  }
+  function roofMatB() {
+    return roofMatB.m || (roofMatB.m = keep(new THREE.MeshStandardMaterial({ color: 0x2c3036, roughness: 0.7, metalness: 0.3 })));
+  }
+
   // ---------------- brake boards + billboards
   {
     const boardMats = { 150: null, 100: null, 50: null };
@@ -1416,7 +2168,39 @@ export function buildWorld(THREE, track, opts = {}) {
     }
   }
 
-  // ---------------- trees (instanced)
+  // ---------------- trees (instanced, with distance LOD to impostors)
+  const treeLOD = [];
+  const lodR2 = (quality >= 2 ? 210 : quality >= 1 ? 160 : 120) ** 2;
+  let lodAt = null;
+  function updateTreeLOD(cp) {
+    for (const L of treeLOD) {
+      let nN = 0;
+      let nF = 0;
+      for (let k = 0; k < L.list.length; k++) {
+        const sp = L.list[k];
+        const dx = sp.x - cp.x;
+        const dz = sp.z - cp.z;
+        if (dx * dx + dz * dz < lodR2) {
+          L.trunks.setMatrixAt(nN, L.mT[k]);
+          L.crowns.setMatrixAt(nN, L.mC[k]);
+          L.crowns.setColorAt(nN, L.cols[k]);
+          nN++;
+        } else {
+          L.imp.setMatrixAt(nF, L.mI[k]);
+          L.imp.setColorAt(nF, L.cols[k]);
+          nF++;
+        }
+      }
+      L.trunks.count = nN;
+      L.crowns.count = nN;
+      L.imp.count = nF;
+      L.trunks.instanceMatrix.needsUpdate = true;
+      L.crowns.instanceMatrix.needsUpdate = true;
+      if (L.crowns.instanceColor) L.crowns.instanceColor.needsUpdate = true;
+      L.imp.instanceMatrix.needsUpdate = true;
+      if (L.imp.instanceColor) L.imp.instanceColor.needsUpdate = true;
+    }
+  }
   {
     const want = quality >= 2 ? 1400 : quality >= 1 ? 900 : 500;
     const area = P.sea ? landR - 30 : A.rad + 900;
@@ -1438,6 +2222,7 @@ export function buildWorld(THREE, track, opts = {}) {
       spots.push({ x, y, z, s: 0.75 + r() * 0.7, rot: r() * 6.28 });
     }
     const dummy = new THREE.Object3D();
+    void dummy;
     const kinds = P.trees === 'coast'
       ? [
         { type: 'round', share: 0.5 },
@@ -1518,17 +2303,61 @@ export function buildWorld(THREE, track, opts = {}) {
       }
       const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
       const crowns = new THREE.InstancedMesh(crownGeo, crownMat, list.length);
+      // LOD: far trees become a crossed-quad impostor (2 tris ×2) with an up-facing normal so it
+      // is lit like the crowns of the real trees.
+      const dims = kd.type === 'conifer' ? [5.8, 10.6] : kd.type === 'palm' ? [10, 9.8] : [8.2, 9.6];
+      const qa = new THREE.PlaneGeometry(dims[0], dims[1]);
+      qa.translate(0, dims[1] / 2, 0);
+      const qb = qa.clone();
+      qb.rotateY(Math.PI / 2);
+      // back faces as separate front-facing quads (a DoubleSide material would flip the up normal)
+      const qc = qa.clone();
+      qc.rotateY(Math.PI);
+      const qd = qa.clone();
+      qd.rotateY(-Math.PI / 2);
+      const impGeo = keep(mergeGeos(THREE, [qa, qb, qc, qd]));
+      for (const q of [qa, qb, qc, qd]) q.dispose();
+      {
+        const na = impGeo.attributes.normal;
+        for (let v = 0; v < na.count; v++) na.setXYZ(v, 0, 1, 0);
+      }
+      const impMat = keep(new THREE.MeshStandardMaterial({
+        map: keep(treeImpostorTexture(THREE, kd.type)), alphaTest: 0.5, roughness: 1,
+      }));
+      const imp = new THREE.InstancedMesh(impGeo, impMat, list.length);
+      const mT = [];
+      const mC = [];
+      const mI = [];
+      const cols = [];
       list.forEach((sp, k) => {
         dummy.position.set(sp.x, sp.y + trunkY * sp.s, sp.z);
         dummy.rotation.set(0, sp.rot, 0);
         dummy.scale.setScalar(sp.s);
         dummy.updateMatrix();
         trunks.setMatrixAt(k, dummy.matrix);
+        mT.push(dummy.matrix.clone());
         dummy.position.set(sp.x, sp.y + crownY * sp.s, sp.z);
         dummy.updateMatrix();
         crowns.setMatrixAt(k, dummy.matrix);
-        crowns.setColorAt(k, col.setHex(greens[(r() * greens.length) | 0]).multiplyScalar(0.85 + r() * 0.3));
+        mC.push(dummy.matrix.clone());
+        dummy.position.set(sp.x, sp.y, sp.z);
+        dummy.updateMatrix();
+        mI.push(dummy.matrix.clone());
+        const c = col.setHex(greens[(r() * greens.length) | 0]).multiplyScalar(0.85 + r() * 0.3).clone();
+        cols.push(c);
+        crowns.setColorAt(k, c);
+        imp.setColorAt(k, c);
+        imp.setMatrixAt(k, dummy.matrix);
       });
+      imp.count = 0;
+      imp.castShadow = false;
+      imp.receiveShadow = true;
+      imp.name = `trees-${kd.type}-far`;
+      imp.frustumCulled = false;
+      trunks.frustumCulled = false;
+      crowns.frustumCulled = false;
+      group.add(imp);
+      treeLOD.push({ list, trunks, crowns, imp, mT, mC, mI, cols });
       trunks.castShadow = true;
       crowns.castShadow = true;
       trunks.receiveShadow = true;
@@ -1554,6 +2383,14 @@ export function buildWorld(THREE, track, opts = {}) {
   U.mieCoefficient.value = P.mie;
   U.mieDirectionalG.value = P.mieG;
   U.sunPosition.value.copy(sunDir);
+  // More, puffier clouds (the r187 Sky has a shaded fbm cloud layer)
+  if (U.cloudCoverage) {
+    U.cloudCoverage.value = id === 'mountain' ? 0.56 : 0.48;
+    U.cloudDensity.value = 0.62;
+    U.cloudElevation.value = 0.42;
+    U.cloudScale.value = 0.00017;
+    U.cloudSpeed.value = 0.00003;
+  }
   sky.name = 'sky';
   group.add(sky);
   keep(sky.geometry);
@@ -1637,6 +2474,14 @@ export function buildWorld(THREE, track, opts = {}) {
   const tmp = new THREE.Vector3();
   function update(camPos, t = 0) {
     frame++;
+    if (U.time) U.time.value = t;
+    if (camPos && treeLOD.length) {
+      // re-bucket trees when the camera has moved ~15 m (cheap, a few thousand comparisons)
+      if (!lodAt || (lodAt.x - camPos.x) ** 2 + (lodAt.z - camPos.z) ** 2 > 225) {
+        lodAt = { x: camPos.x, z: camPos.z };
+        updateTreeLOD(camPos);
+      }
+    }
     if (camPos) {
       sky.position.copy(camPos);
       // shadow box follows the camera's ground position
@@ -1702,6 +2547,7 @@ export function buildWorld(THREE, track, opts = {}) {
     exposure: P.exposure,
     corners: A.corners.map((c) => ({ s: c.peakI, dir: c.dir, severity: c.peak })),
     groundY,
+    bridgeAt,
     update,
     setFlare,
     dispose,

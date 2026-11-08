@@ -45,7 +45,7 @@ export const AI_LEVEL_IDS = Object.keys(AI_LEVELS);
  * Only used when the race passes ctx.brake (circuit); the normal course values above are untouched.
  */
 export const CIRCUIT_TUNE = {
-  easy: { skillMul: 0.76, band: 0.24, hold: 0.32, floor: 0.5, lead: 0.0, hover: 700 },
+  easy: { skillMul: 0.79, band: 0.22, hold: 0.3, floor: 0.52, lead: 0.0, hover: 650 },
   normal: { skillMul: 0.745, band: 0.2, hold: 0.3, floor: 0.52, lead: 0.0, hover: 650 },
   hard: { skillMul: 0.736, band: 0.16, hold: 0.25, floor: 0.55, lead: 0.03, hover: 560 },
 };

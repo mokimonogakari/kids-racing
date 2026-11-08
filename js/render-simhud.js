@@ -13,6 +13,7 @@ const ACCENT = '#ff3b5c';
 const BEST = '#c070ff'; // purple = best lap
 const GOOD = '#36d17a';
 const BAD = '#ff5a5a';
+const WARN = '#ffc93c'; // yellow = slower sector
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const num = (v, d = 0) => (Number.isFinite(v) ? v : d);
@@ -105,8 +106,9 @@ function drawLapTimer(r, race, box) {
   const y = box.y + box.h + 6;
   const w = box.w;
   const h = sm ? 46 : 54;
-  const now = num(race.time, 0);
-  const start = num(race.lapStart, 3);
+  // lapStart is on the race clock (seconds since the green light), not race.time.
+  const now = Number.isFinite(race.raceClock) ? race.raceClock : num(race.time, 0) - 3;
+  const start = num(race.lapStart, 0);
   const racing = race.state === 'race';
   const cur = racing ? Math.max(0, now - start) : race.state === 'goal' ? 0 : 0;
   const times = Array.isArray(race.lapTimes) ? race.lapTimes : [];
@@ -119,7 +121,7 @@ function drawLapTimer(r, race, box) {
   text(c, 'BEST', x + 10, y + h - 13, lab, 'rgba(255,255,255,0.55)', 'left', MONO, 700);
   text(c, formatLap(best), x + w - 10, y + h - 12, f1 - 2, best > 0 ? BEST : 'rgba(255,255,255,0.5)', 'right', MONO, 800);
   // delta vs best, shown for 3 s after each lap
-  const lastAt = num(race.lapStart, -99);
+  const lastAt = Number.isFinite(race.lapStart) && times.length ? race.lapStart : -99;
   if (times.length && best > 0 && now - lastAt < 3) {
     const last = times[times.length - 1];
     const d = last - best;
@@ -133,7 +135,83 @@ function drawLapTimer(r, race, box) {
     c.fill();
     text(c, label, bx + bw / 2, y + h / 2, sm ? 12 : 13, '#fff', 'center', MONO, 800);
   }
-  return { x, y, w, h };
+  drawSectors(r, race, now, { x, y: y + h + 6, w });
+  return { x, y, w, h: h + 6 + (sm ? 8 : 9) + (sm ? 0 : 36) };
+}
+
+// ---------------------------------------------------------------- sectors
+// One lap = 3 sectors. On each sector line the split flashes for 2 s:
+// purple = new best for that sector, green = first time / matched, yellow = slower.
+const SECTORS = 3;
+function sectorTrack(r, race, clock) {
+  let st = r._sec;
+  if (!st || st.race !== race) {
+    st = r._sec = { race, idx: 0, start: 0, best: new Array(SECTORS).fill(0), flash: null, splits: [] };
+  }
+  if (race.state !== 'race' && race.state !== 'goal') return st;
+  const lp = Number.isFinite(race.lapProgress) ? race.lapProgress : 0;
+  const lap = Math.max(1, num(race.lap, 1));
+  const finished = race.state === 'goal';
+  const idx = finished ? num(race.laps, lap) * SECTORS : (lap - 1) * SECTORS + Math.min(SECTORS - 1, Math.floor(lp * SECTORS));
+  while (st.idx < idx) {
+    const slot = st.idx % SECTORS;
+    // a lap line crossing: use the race's own lap clock for the exact split end
+    const end = slot === SECTORS - 1 && Number.isFinite(race.lapStart) && race.lapStart > st.start ? race.lapStart : clock;
+    const time = Math.max(0, end - st.start);
+    const prev = st.best[slot];
+    let col = GOOD;
+    if (prev > 0) col = time < prev - 1e-3 ? BEST : time <= prev + 1e-3 ? GOOD : WARN;
+    if (!prev || time < prev) st.best[slot] = time;
+    st.flash = { slot, time, col, delta: prev > 0 ? time - prev : null, t0: clock };
+    st.start = end;
+    st.idx++;
+  }
+  return st;
+}
+function drawSectors(r, race, clock, at) {
+  const st = sectorTrack(r, race, clock);
+  const c = r.c;
+  const sm = small(r);
+  const h = sm ? 8 : 9;
+  const gap = 4;
+  const bw = (at.w - gap * (SECTORS - 1)) / SECTORS;
+  const lap = Math.max(1, num(race.lap, 1));
+  const cur = st.idx - (lap - 1) * SECTORS;
+  for (let k = 0; k < SECTORS; k++) {
+    const bx = at.x + k * (bw + gap);
+    c.fillStyle = 'rgba(10,13,22,0.7)';
+    rrect(c, bx, at.y, bw, h, 3);
+    c.fill();
+    let fill = 0;
+    if (race.state === 'goal' || k < cur) fill = 1;
+    else if (k === cur) fill = clamp((num(race.lapProgress, 0) * SECTORS) - k, 0, 1);
+    if (fill > 0) {
+      c.fillStyle = k < cur ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.85)';
+      rrect(c, bx, at.y, Math.max(h, bw * fill), h, 3);
+      c.fill();
+    }
+  }
+  const f = st.flash;
+  if (f && clock - f.t0 < 2 && clock >= f.t0) {
+    const a = clamp((2 - (clock - f.t0)) / 0.3, 0, 1);
+    const bw2 = sm ? 118 : 134;
+    const bh = sm ? 26 : 30;
+    // landscape: beside the timer; portrait: under the sector bar (space reserved by drawLapTimer)
+    const bx = sm ? at.x + at.w + 6 : at.x;
+    const by = sm ? at.y + h / 2 - bh / 2 : at.y + h + 6;
+    c.save();
+    c.globalAlpha = a;
+    c.fillStyle = 'rgba(10,13,22,0.88)';
+    rrect(c, bx, by, bw2, bh, 7);
+    c.fill();
+    c.fillStyle = f.col;
+    rrect(c, bx, by, 6, bh, 3);
+    c.fill();
+    text(c, 'S' + (f.slot + 1), bx + 12, by + bh / 2, sm ? 11 : 12, f.col, 'left', MONO, 900);
+    const label = f.delta == null ? formatLap(f.time).replace(/^0:/, '') : formatDelta(f.delta);
+    text(c, label, bx + bw2 - 8, by + bh / 2, sm ? 13 : 14, '#fff', 'right', MONO, 800);
+    c.restore();
+  }
 }
 
 // ---------------------------------------------------------------- tachometer
@@ -195,6 +273,14 @@ function drawTacho(r, race, t) {
   c.arc(cx, cy, R - 4, A0, A0 + SW * Math.min(rpm, red));
   c.stroke();
   if (rpm > red) {
+    // blink the red zone while the engine sits on the limiter
+    const blink = 0.5 + 0.5 * Math.sin(t * 22);
+    c.strokeStyle = `rgba(255,59,92,${0.35 + 0.65 * blink})`;
+    c.lineWidth = 9;
+    c.beginPath();
+    c.arc(cx, cy, R - 4, A0 + SW * red, A0 + SW);
+    c.stroke();
+    c.lineWidth = 4;
     c.strokeStyle = '#ff9aac';
     c.beginPath();
     c.arc(cx, cy, R - 4, A0 + SW * red, A0 + SW * rpm);
@@ -237,7 +323,17 @@ function drawTacho(r, race, t) {
   c.stroke();
   // gear
   const g = gearOf(race);
-  text(c, String(g), cx + R * 0.02, cy + R * 0.42, R * 0.5, '#fff', 'center', MONO, 900);
+  if (r._gearPrev !== g) {
+    if (r._gearPrev != null) r._gearAt = t;
+    r._gearPrev = g;
+  }
+  const ga = clamp((t - num(r._gearAt, -9)) / 0.28, 0, 1); // 0 just shifted → 1 settled
+  const gs = 1 + (1 - ga) * 0.45;
+  c.save();
+  c.translate(cx + R * 0.02, cy + R * 0.42);
+  c.scale(gs, gs);
+  text(c, String(g), 0, 0, R * 0.5, ga < 1 ? `rgb(255,${Math.round(210 + 45 * ga)},${Math.round(60 + 195 * ga)})` : '#fff', 'center', MONO, 900);
+  c.restore();
   // speed (big digital) under the dial
   const kmh = Math.round(num(race.kmh, 0));
   const sw = R * 1.5;

@@ -133,6 +133,7 @@ function show(name) {
     sound.crowdAmbience?.(false);
   }
   if (name !== 'garage') stopGarageSpin();
+  if (name !== 'race') hideCourseIntro();
   if (!(app.mode === 'circuit' && ['race', 'goal', 'replay'].includes(name))) detach3D();
 }
 
@@ -317,6 +318,7 @@ function pickCourse(id, el) {
 
 // ---------------------------------------------------------------- race
 function startRace() {
+  hideCourseIntro();
   clearInput();
   resumeRace();
   $('#star-count').textContent = '0 / 5';
@@ -562,6 +564,25 @@ function onGoal(result) {
   app.earned = earned;
   app.fresh = book.add(earned);
   app.recordInfo = records.update(app.mode === 'circuit' ? 'circuit-' + app.circuit : app.course, result);
+  if (app.mode === 'circuit') {
+    // Per-circuit best lap, kept apart from the race record.
+    const key = `circuit-${app.circuit}-lap`;
+    let prevLap = 0;
+    try {
+      prevLap = records.get(key).bestTime || 0;
+    } catch (e) {
+      prevLap = 0;
+    }
+    const lapInfo = Number.isFinite(result.bestLap) && result.bestLap > 0 ? records.update(key, { raceTime: result.bestLap }) : { newBestTime: false };
+    let bestLapRec = prevLap;
+    try {
+      bestLapRec = records.get(key).bestTime || 0;
+    } catch (e) {
+      /* keep prev */
+    }
+    app.recordInfo = { ...(app.recordInfo || {}), newBestLap: !!lapInfo.newBestTime, prevBestLap: prevLap, bestLapRecord: bestLapRec };
+    if (lapInfo.newBestTime) setTimeout(() => voice.say('ベストラップ しんきろく！', { interrupt: false }), 1600);
+  }
   if (app.mode === 'circuit') sound.crowdAmbience?.(true);
   try {
     if (app.mode === 'circuit') throw new Error('no ghosts on circuits');
@@ -699,6 +720,20 @@ function paintGoal() {
   if (info.newBestTime) line += ' 🎉 しんきろく！';
   if (info.firstWin) line += ' 🏆 はじめての ゆうしょう！';
   $('#race-record').textContent = line;
+  // Circuit: per-circuit best-lap record under the line.
+  let lr = $('#lap-record');
+  if (app.mode === 'circuit' && info.bestLapRecord > 0) {
+    if (!lr) {
+      lr = document.createElement('p');
+      lr.id = 'lap-record';
+      lr.className = 'lap-record';
+      $('#race-record').after(lr);
+    }
+    lr.hidden = false;
+    lr.innerHTML = info.newBestLap
+      ? `<span class="new">★ ベストラップ しんきろく！ ${formatTime(info.bestLapRecord)}</span>${info.prevBestLap > 0 ? `（まえ ${formatTime(info.prevBestLap)}）` : ''}`
+      : `このコースの ベストラップ ${formatTime(info.bestLapRecord)}`;
+  } else if (lr) lr.hidden = true;
 }
 
 
@@ -842,6 +877,61 @@ function garage3DShow() {
     }
   });
 }
+// Garage gestures: drag to turn the car, pinch / wheel to zoom.
+(function garageGestures() {
+  const stage = document.querySelector('.garage-stage');
+  if (!stage) return;
+  const pts = new Map();
+  let lastX = 0;
+  let lastD = 0;
+  const g = () => (g3.garage && !g3.gFailed && app.screen === 'garage' ? g3.garage : null);
+  const dist = () => {
+    const [a, b] = [...pts.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  stage.addEventListener('pointerdown', (e) => {
+    if (!g()) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    lastX = e.clientX;
+    if (pts.size === 2) lastD = dist();
+    try {
+      stage.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const gg = g();
+    if (!gg) return;
+    if (pts.size === 1) {
+      gg.rotateBy?.(e.clientX - lastX);
+      lastX = e.clientX;
+    } else if (pts.size === 2) {
+      const d = dist();
+      if (lastD > 0 && d > 0) gg.zoomBy?.(d / lastD);
+      lastD = d;
+    }
+  });
+  const up = (e) => {
+    pts.delete(e.pointerId);
+    lastD = pts.size === 2 ? dist() : 0;
+    if (pts.size === 1) lastX = [...pts.values()][0].x;
+  };
+  stage.addEventListener('pointerup', up);
+  stage.addEventListener('pointercancel', up);
+  stage.addEventListener(
+    'wheel',
+    (e) => {
+      const gg = g();
+      if (!gg) return;
+      e.preventDefault();
+      gg.zoomBy?.(e.deltaY < 0 ? 1.08 : 1 / 1.08);
+    },
+    { passive: false },
+  );
+})();
 function garageLoop(ts) {
   if (app.screen !== 'garage' || !g3.garage || g3.gFailed) {
     g3.garageOn = false;
@@ -1187,11 +1277,63 @@ function startCircuitRace() {
   $('#btn-cam').hidden = false;
   btnBoost?.classList.remove('ready', 'fire');
   buildGridIntro();
+  showCourseIntro(app.race);
   app.gearWas = 1;
   app.brakeAt = 0;
-  voice.say(say('circuitLine', 'サーキットで 3しゅう しょうぶ！'));
   voice.say(L.startLine(), { interrupt: false });
   lastT = 0;
+}
+
+// ---- course intro card (circuit): name, length, corners, laps, weather — then the lights.
+const INTRO_MS = FAST ? 2500 : 3200;
+function circuitCornerCount(course) {
+  const list = (course.corners || []).filter((c) => !c.lap || c.lap === 1).map((c) => c.index).sort((a, b) => a - b);
+  let n = 0;
+  let last = -1e9;
+  for (const i of list) {
+    if (i - last > 25) n++;
+    last = i;
+  }
+  return n;
+}
+function showCourseIntro(race) {
+  const el = $('#course-intro');
+  if (!el || !race || !race.course) return;
+  const course = race.course;
+  const def = circuitDefs()[app.circuit] || course.def || {};
+  const km = course.track && course.track.length ? course.track.length / 1000 : ((course.lapLength || 0) * (course.metersPerSegment || 5)) / 1000;
+  const corners = circuitCornerCount(course);
+  const laps = course.laps || CIRCUIT_LAPS;
+  const wx = def.base === 'sea' ? '☀️' : '⛅';
+  el.innerHTML = `<div class="ci-card"><div class="ci-head"><b>${def.label || ''}</b><span class="ci-wx" aria-hidden="true">${wx}</span></div>`
+    + '<canvas aria-hidden="true"></canvas>'
+    + `<div class="ci-stats"><div><small>ながさ</small><strong>${km.toFixed(1)}<em>km</em></strong></div>`
+    + `<div><small>カーブ</small><strong>${corners}<em>こ</em></strong></div>`
+    + `<div><small>しゅうかい</small><strong>${laps}<em>しゅう</em></strong></div></div></div>`;
+  el.classList.remove('out');
+  el.hidden = false;
+  paintCircuitCard(el.querySelector('canvas'), app.circuit, def);
+  // Counted down by rendered frames (not wall time), so a slow first 3D build never eats the card.
+  app.introLeft = INTRO_MS / 1000;
+  voice.say(`${def.label || 'サーキット'}！ ${laps}しゅう はしるよ！`, { interrupt: true });
+}
+/** Advance the intro card; true while the race should stay on the grid. */
+function tickCourseIntro(dt) {
+  if (!(app.introLeft > 0)) return false;
+  app.introLeft -= dt;
+  const el = $('#course-intro');
+  if (el && app.introLeft <= 0.4) el.classList.add('out');
+  if (app.introLeft <= 0) {
+    app.introLeft = 0;
+    if (el) el.hidden = true;
+    return false;
+  }
+  return true;
+}
+function hideCourseIntro() {
+  app.introLeft = 0;
+  const el = $('#course-intro');
+  if (el) el.hidden = true;
 }
 
 const CAM_MODES = ['chase', 'far', 'bumper'];
@@ -1626,7 +1768,9 @@ function frame(ts) {
   const dt = lastT ? Math.min(0.05, (ts - lastT) / 1000) : 1 / 60;
   lastT = ts;
   const steer = app.screen === 'race' ? currentSteer() : 0;
-  app.race.update(dt, { steer });
+  if (app.introLeft > 0 && app.race.state !== 'countdown') hideCourseIntro();
+  const holding = app.race.state === 'countdown' && tickCourseIntro(dt);
+  app.race.update(holding ? 0 : dt, { steer });
   announcer.tick();
   renderer.steer = steer;
   renderer.dt = dt;

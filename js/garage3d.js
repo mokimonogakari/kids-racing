@@ -236,6 +236,8 @@ export function createGarage3D(canvas) {
 
   const ready = build().then(() => true);
 
+  let zoom = 1;
+  let holdSpin = 0;
   function updateCamera() {
     const aspect = w / h;
     camera.aspect = aspect;
@@ -243,7 +245,7 @@ export function createGarage3D(canvas) {
     const len = car?.userData.size ? Math.max(car.userData.size.z, car.userData.size.x) : 4.6;
     const fitDist = (len * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.min(1, aspect * 1.05);
     const breathe = 1 + Math.sin(time * 0.35) * 0.06;
-    const dist = Math.max(6, fitDist) * breathe;
+    const dist = Math.max(6, fitDist) * breathe * zoom;
     const yaw = 0.6 + Math.sin(time * 0.2) * 0.15;
     camera.position.set(Math.sin(yaw) * dist, 1.6 + dist * 0.16, Math.cos(yaw) * dist);
     camera.lookAt(0, 0.65, 0);
@@ -262,6 +264,17 @@ export function createGarage3D(canvas) {
       if (car?.userData.setColor) car.userData.setColor(hex);
       else build();
     },
+    /** Turn the turntable by hand (dx in screen pixels). */
+    rotateBy(dx) {
+      if (!Number.isFinite(dx)) return;
+      table.rotation.y += dx * 0.01;
+      holdSpin = 2.5;
+    },
+    /** Zoom: k > 1 moves closer, k < 1 moves away. */
+    zoomBy(k) {
+      if (!Number.isFinite(k) || k <= 0) return;
+      zoom = Math.min(1.5, Math.max(0.6, zoom / k));
+    },
     setModel(id) {
       if (id === state.model) return;
       state.model = id;
@@ -276,7 +289,9 @@ export function createGarage3D(canvas) {
     render(dt = 1 / 60) {
       if (disposed) return;
       time += dt;
-      table.rotation.y += dt * 0.35;
+      // Auto-spin, paused for a moment after the child turns the car by hand.
+      holdSpin = Math.max(0, holdSpin - dt);
+      if (holdSpin <= 0) table.rotation.y += dt * 0.35;
       car?.userData.spin?.(0);
       updateCamera();
       renderer.render(scene, camera);

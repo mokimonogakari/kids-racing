@@ -9,6 +9,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const SEG = 200; // physics SEGMENT_LENGTH (world units of the Race)
@@ -16,6 +17,41 @@ const M_PER_SEG = 5; // metres per segment (contract)
 const HALF_W = 7; // half road width in metres (x = ±1 → ±7 m)
 export const CAMERAS = ['chase', 'far', 'bumper'];
 export const REPLAY_CAMERAS = ['tv', 'heli', 'chase'];
+export const INTRO_SECS = 1.8; // fly-by over the grid during the first part of the countdown
+export const FINISH_SECS = 2; // side-on finish camera after crossing the line
+const MAX_PARTICLES = 150;
+
+/* Light radial (zoom) blur used at speed, quality 2 only. */
+const RadialBlurShader = {
+  uniforms: { tDiffuse: { value: null }, strength: { value: 0 }, center: { value: new THREE.Vector2(0.5, 0.52) } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float strength; uniform vec2 center; varying vec2 vUv;
+    void main(){
+      vec2 d = vUv - center;
+      float r = length(d);
+      float k = strength * smoothstep(0.12, 0.75, r); // keep the middle (car, road ahead) sharp
+      vec4 c = vec4(0.0);
+      for (int i = 0; i < 8; i++) { c += texture2D(tDiffuse, vUv - d * k * (float(i) / 7.0)); }
+      gl_FragColor = c / 8.0;
+    }`,
+};
+
+let softTex = null;
+function softTexture() {
+  if (softTex) return softTex;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  softTex = new THREE.CanvasTexture(cv);
+  softTex.colorSpace = THREE.SRGBColorSpace;
+  return softTex;
+}
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const damp = (k, dt) => 1 - Math.exp(-k * dt);
@@ -188,6 +224,10 @@ export function createView3D(canvas) {
     shake: 0,
     showLine: true,
     line: null,
+    radial: null,
+    fx: null, // tyre smoke / dust particles
+    introT: null, // manual intro override (0..1) for previews
+    curbT: 0,
   };
   try {
     const q = new URLSearchParams(location.search).get('q');
@@ -218,6 +258,12 @@ export function createView3D(canvas) {
       const bh = Math.max(1, Math.floor(st.h / (q >= 2 ? 2 : 3)));
       st.bloom = new UnrealBloomPass(new THREE.Vector2(bw, bh), 0.25, 0.35, 0.97);
       composer.addPass(st.bloom);
+    }
+    st.radial = null;
+    if (q >= 2) {
+      st.radial = new ShaderPass(RadialBlurShader);
+      st.radial.enabled = false;
+      composer.addPass(st.radial);
     }
     if (q >= 2) composer.addPass(new SMAAPass());
     else composer.addPass(new FXAAPass());
@@ -421,6 +467,7 @@ export function createView3D(canvas) {
     st.cars = [];
     st.playerBox = null;
     if (st.line) { scene.remove(st.line); disposeObj(st.line); st.line = null; }
+    if (st.fx) { scene.remove(st.fx.mesh); st.fx.mesh.geometry.dispose(); st.fx.mesh.material.dispose(); st.fx = null; }
     if (st.world) { scene.remove(st.world.group); try { st.world.dispose(); } catch (e) { /* ignore */ } st.world = null; }
   }
 
@@ -487,6 +534,9 @@ export function createView3D(canvas) {
       scene.add(o);
       st.cars.push({ obj: o, src: i, lastX: r.x, steer: 0, yawV: 0 });
     });
+    for (const c of st.cars) addBrakeGlow(c);
+    st.fx = makeParticles();
+    scene.add(st.fx.mesh);
     st.camInit = false;
     st.tvPoint = null;
     st.lastFrameAt = null;
@@ -501,6 +551,151 @@ export function createView3D(canvas) {
   const _m = new THREE.Matrix4();
   const _q = new THREE.Quaternion();
   const _qy = new THREE.Quaternion();
+
+  /* ---------------- brake-light glow ----------------
+   * Two additive soft sprites behind the tail lights, shown while braking. They make the
+   * lights bloom clearly (the bloom pass only catches near-white pixels after tone mapping). */
+  function addBrakeGlow(c) {
+    try {
+      const b = localBox(c.obj);
+      const w = b.max.x - b.min.x;
+      const h = b.max.y - b.min.y;
+      const mat = new THREE.SpriteMaterial({ map: softTexture(), color: 0xff2a1a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+      const group = new THREE.Group();
+      for (const sx of [-1, 1]) {
+        const sp = new THREE.Sprite(mat);
+        sp.position.set(sx * w * 0.36, b.min.y + h * 0.5, b.min.z - 0.05);
+        sp.scale.set(0.9, 0.55, 1);
+        sp.renderOrder = 5;
+        group.add(sp);
+      }
+      group.visible = false;
+      c.obj.add(group);
+      c.glow = { group, mat, k: 0 };
+    } catch (e) { c.glow = null; }
+  }
+
+  function updateGlow(c, braking, dt, near) {
+    const g = c.glow;
+    if (!g) return;
+    g.k += ((braking ? 1 : 0) - g.k) * damp(braking ? 18 : 8, dt);
+    g.group.visible = g.k > 0.02 && near;
+    g.mat.opacity = 0.95 * g.k;
+    const s = 0.8 + 0.25 * g.k;
+    for (const sp of g.group.children) sp.scale.set(0.9 * s, 0.55 * s, 1);
+  }
+
+  /* ---------------- tyre smoke / dust ----------------
+   * One InstancedMesh of camera-facing quads (max 150). Off the track the wheels kick up
+   * brown dust; hard steering at speed leaves white tyre smoke. */
+  function makeParticles() {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({ map: softTexture(), transparent: true, depthWrite: false, opacity: 0.55, fog: true });
+    const mesh = new THREE.InstancedMesh(geo, mat, MAX_PARTICLES);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 4;
+    mesh.name = 'tyreFx';
+    const P = [];
+    for (let i = 0; i < MAX_PARTICLES; i++) P.push({ life: 0, max: 1, pos: new THREE.Vector3(), vel: new THREE.Vector3(), size: 1, grow: 1, col: new THREE.Color() });
+    return { mesh, P, next: 0, acc: new Map() };
+  }
+
+  const _zero = new THREE.Vector3();
+  const DUST = new THREE.Color(0xe0cda6);
+  const SMOKE = new THREE.Color(0xf2f2f2);
+  function emit(pos, vel, col, size, life) {
+    const fx = st.fx;
+    if (!fx) return;
+    let p = null;
+    for (let n = 0; n < MAX_PARTICLES; n++) {
+      const c = fx.P[(fx.next + n) % MAX_PARTICLES];
+      if (c.life <= 0) { p = c; fx.next = (fx.next + n + 1) % MAX_PARTICLES; break; }
+    }
+    if (!p) { p = fx.P[fx.next]; fx.next = (fx.next + 1) % MAX_PARTICLES; }
+    p.pos.copy(pos);
+    p.vel.copy(vel);
+    p.col.copy(col);
+    p.size = size;
+    p.grow = size * 2.2;
+    p.max = p.life = life;
+  }
+
+  const _e = new THREE.Vector3();
+  const _ev = new THREE.Vector3();
+  function emitFromCar(c, kind, rate, dt) {
+    const fx = st.fx;
+    const key = c.obj.id;
+    let a = (fx.acc.get(key) || 0) + rate * dt;
+    const o = c.obj;
+    const carVel = c.vel || _zero;
+    const right = _v.set(1, 0, 0).applyQuaternion(o.quaternion);
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion);
+    while (a >= 1) {
+      a -= 1;
+      const side = Math.random() < 0.5 ? -1 : 1;
+      _e.copy(o.position).addScaledVector(right, side * 0.82).addScaledVector(fwd, -0.15 + Math.random() * 0.3);
+      _e.y += 0.25;
+      // Smoke is dragged along by the car's wake, so it hangs behind the car where the chase
+      // camera can see it instead of being left 50 m back within a second.
+      _ev.copy(carVel).multiplyScalar(0.78 + Math.random() * 0.1).addScaledVector(fwd, -1.5 - Math.random() * 2).addScaledVector(right, side * (0.4 + Math.random() * 0.8));
+      _ev.y += 0.6 + Math.random() * 0.9;
+      if (kind === 'dust') emit(_e, _ev, DUST, 1.0 + Math.random() * 0.7, 1.0 + Math.random() * 0.6);
+      else emit(_e, _ev, SMOKE, 0.5 + Math.random() * 0.4, 0.7 + Math.random() * 0.4);
+    }
+    fx.acc.set(key, a);
+  }
+
+  function updateParticles(race, dt) {
+    const fx = st.fx;
+    if (!fx) return;
+    // emitters
+    if (race.state !== 'countdown') {
+      const p = race.player;
+      const pctP = clamp(race.speedPct ?? 0, 0, 1.6);
+      for (const c of st.cars) {
+        const src = c.src === 'player' ? p : race.rivals[c.src];
+        if (!src || !c.obj.visible) continue;
+        if (c.obj.position.distanceToSquared(camera.position) > 90 * 90) continue;
+        const pct = c.src === 'player' ? pctP : clamp((src.speed || 0) / (race.preset?.maxSpeed || 3000), 0, 1.6);
+        if (pct < 0.15 || (src.air || 0) > 0) continue;
+        const off = Math.abs(src.x) > 1.05;
+        const steer = c.src === 'player' ? Math.abs(p.steer || 0) : Math.abs(c.steer || 0);
+        const hard = (c.src === 'player' && p.drift) || (steer > 0.65 && pct > 0.6);
+        const budget = st.quality >= 2 ? 1 : st.quality >= 1 ? 0.6 : 0.3;
+        if (off) emitFromCar(c, 'dust', 38 * pct * budget, dt);
+        else if (hard) emitFromCar(c, 'smoke', 26 * pct * budget, dt);
+      }
+    }
+    // integrate + write instances
+    const mesh = fx.mesh;
+    let n = 0;
+    for (const q of fx.P) {
+      if (q.life <= 0) continue;
+      q.life -= dt;
+      if (q.life <= 0) continue;
+      q.pos.addScaledVector(q.vel, dt);
+      q.vel.multiplyScalar(Math.exp(-0.9 * dt));
+      q.vel.y += 0.25 * dt;
+      const u = 1 - q.life / q.max;
+      const sz = q.size + (q.grow - q.size) * u;
+      // fade by shrinking towards the end and by darkening the tint (additive-free alpha blend)
+      const fade = u < 0.15 ? u / 0.15 : 1 - (u - 0.15) / 0.85;
+      _m.compose(q.pos, camera.quaternion, _ev.set(sz, sz, sz));
+      mesh.setMatrixAt(n, _m);
+      _c.copy(q.col).multiplyScalar(0.35 + 0.65 * fade);
+      mesh.setColorAt(n, _c);
+      n++;
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.material.opacity = 0.62;
+  }
+  const _c = new THREE.Color();
 
   function placeCar(c, z, x, steerIn, speed, braking, dt) {
     const tt = toTrack(z, x);
@@ -524,6 +719,12 @@ export function createView3D(canvas) {
     c.obj.quaternion.copy(_qy.multiply(_q));
     // slight body roll by steering
     c.steer += (steerIn - c.steer) * damp(8, dt);
+    if (dt > 0 && c.prevPos) {
+      c.vel = c.vel || new THREE.Vector3();
+      const vx = (f.pos[0] - c.prevPos.x) / dt, vy = (f.pos[1] - c.prevPos.y) / dt, vz = (f.pos[2] - c.prevPos.z) / dt;
+      if (vx * vx + vy * vy + vz * vz < 160 * 160) c.vel.set(vx, vy, vz);
+    }
+    c.prevPos = (c.prevPos || new THREE.Vector3()).set(f.pos[0], f.pos[1], f.pos[2]);
     c.obj.position.set(f.pos[0], f.pos[1], f.pos[2]);
     const ud = c.obj.userData || {};
     try {
@@ -540,14 +741,17 @@ export function createView3D(canvas) {
     for (const c of st.cars) {
       if (c.src === 'player') {
         const steer = p.steer ?? 0;
-        pf = placeCar(c, p.z, p.x, steer, p.speed || 0, race.braking || p.braking, dt);
+        const br = !!(race.braking || p.braking) && race.state !== 'countdown';
+        pf = placeCar(c, p.z, p.x, steer, p.speed || 0, br, dt);
         c.obj.visible = true;
+        updateGlow(c, br, dt, true);
       } else {
         const r = race.rivals[c.src];
         if (!r) { c.obj.visible = false; continue; }
         const st2 = clamp((r.x - c.lastX) * 30, -1, 1);
         placeCar(c, r.z, r.x, st2, r.speed || 0, r.braking, dt);
         c.obj.visible = true;
+        updateGlow(c, !!r.braking, dt, c.obj.position.distanceToSquared(camera.position) < 160 * 160);
       }
     }
     return pf;
@@ -567,7 +771,14 @@ export function createView3D(canvas) {
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(pc.quaternion);
     const pct = clamp(race.speedPct ?? (p.speed / 3000), 0, 1.6);
     let desired, look, fov = 60, k = 7;
-    const mode = st.camMode;
+    // Pre-race fly-by over the grid (first part of the countdown), or a manual preview.
+    const introU = st.introT != null ? st.introT
+      : (!st.replay && race.state === 'countdown' && (race.stateTime ?? 0) < INTRO_SECS ? (race.stateTime ?? 0) / INTRO_SECS : null);
+    if (introU != null) { applyIntro(race, clamp(introU, 0, 1), pos, fwd, up); return; }
+    let mode = st.camMode;
+    // Side-on finish camera for the first seconds after the player crosses the line.
+    const finishing = !st.replay && race.state === 'goal' && (race.stateTime ?? 99) < FINISH_SECS;
+    if (finishing) mode = 'finish';
     if (mode === 'far') {
       desired = pos.clone().addScaledVector(fwd, -9.5).addScaledVector(up, 3.2);
       look = pos.clone().addScaledVector(fwd, 6).addScaledVector(up, 0.8);
@@ -586,6 +797,15 @@ export function createView3D(canvas) {
       look = desired.clone().addScaledVector(fwd, 40).addScaledVector(up, -40 * Math.tan(pitch));
       fov = (portrait ? 64 : 50) + 8 * Math.min(1, pct);
       k = 40;
+    } else if (mode === 'finish') {
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(pc.quaternion);
+      const u = clamp((race.stateTime ?? 0) / FINISH_SECS, 0, 1);
+      const portrait = camera.aspect < 1;
+      const side = portrait ? 13 : 10;
+      desired = pos.clone().addScaledVector(right, -side).addScaledVector(up, 1.4).addScaledVector(fwd, 4.5 - 3.5 * u);
+      look = pos.clone().addScaledVector(up, 0.6).addScaledVector(fwd, 1.2);
+      fov = portrait ? 44 : 34;
+      k = 5;
     } else if (mode === 'heli') {
       const tt = toTrack(p.z, 0);
       desired = trackPoint(tt.s - 30, 1.6, 42);
@@ -641,6 +861,13 @@ export function createView3D(canvas) {
       st.fov += (fov - st.fov) * damp(4, dt);
     }
     camera.position.copy(st.camPos);
+    // Riding the kerb: a fine, fast buzz (only from the on-board style cameras).
+    if (!st.replay && race.state === 'race' && p.curb && (mode === 'chase' || mode === 'far' || mode === 'bumper')) {
+      const a = (mode === 'bumper' ? 0.018 : 0.026) * (0.5 + 0.5 * Math.min(1, pct));
+      camera.position.x += (Math.random() - 0.5) * a;
+      camera.position.y += (Math.random() - 0.5) * a * 1.6;
+      st.curbT = 0.12;
+    }
     if (st.shake > 0) {
       st.shake = Math.max(0, st.shake - dt);
       camera.position.x += (Math.random() - 0.5) * 0.06 * st.shake;
@@ -658,6 +885,46 @@ export function createView3D(canvas) {
       sun.position.copy(pos).addScaledVector(sunDir, 120);
       sun.target.position.copy(pos);
       sun.target.updateMatrixWorld();
+    }
+  }
+
+  // Fly from high above the track ahead of the grid down to just behind the player's car.
+  function applyIntro(race, u, pos, fwd, up) {
+    const e = u * u * (3 - 2 * u);
+    const tt = toTrack(race.player.z, 0);
+    const a = trackPoint(tt.s + 120, -3.2, 52);
+    const b = pos.clone().addScaledVector(fwd, -8.5).addScaledVector(up, 3.1);
+    const camPos = a.clone().lerp(b, e);
+    camPos.y += Math.sin(Math.PI * e) * 8;
+    const grid = trackPoint(tt.s + 6, 0, 1.2);
+    const lookB = pos.clone().addScaledVector(fwd, 20).addScaledVector(up, 0.6);
+    const look = grid.lerp(lookB, e * e);
+    const fov = 48 + 10 * e;
+    st.camPos.copy(camPos);
+    st.camLook.copy(look);
+    st.fov = fov;
+    st.camInit = true;
+    st.prevCarPos = (st.prevCarPos || new THREE.Vector3()).copy(pos);
+    camera.position.copy(camPos);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(look);
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+
+  function updatePost(race) {
+    const p = race.player;
+    const pct = clamp(race.speedPct ?? 0, 0, 1.6);
+    if (st.radial) {
+      const onboard = st.camMode === 'chase' || st.camMode === 'far' || st.camMode === 'bumper';
+      let k = 0;
+      if (!st.replay && onboard && race.state === 'race') k = clamp((pct - 0.55) / 0.6, 0, 1) * 0.035 + (p.boost > 0 ? 0.02 : 0);
+      st.radial.uniforms.strength.value = k;
+      st.radial.enabled = k > 0.002;
+    }
+    if (st.bloom) {
+      const g = st.cars[0]?.glow?.k || 0;
+      st.bloom.strength = 0.25 + 0.2 * g;
     }
   }
 
@@ -701,6 +968,8 @@ export function createView3D(canvas) {
     dt = clamp(dt, 0, 0.1);
     updateCars(race, dt);
     updateCamera(race, dt);
+    updateParticles(race, dt);
+    updatePost(race);
     updateRacingLine(race);
     try { st.world?.update?.(st.cars[0]?.obj?.position || camera.position, t, { race, camera, quality: st.quality }); } catch (e) { /* ignore */ }
     if (st.composer) st.composer.render(dt);
@@ -747,6 +1016,9 @@ export function createView3D(canvas) {
     resize,
     setReplay,
     shake(k = 1) { st.shake = Math.max(st.shake, 0.4 * k); },
+    // Preview / force the pre-race fly-by: t in 0..1, or null to return to automatic.
+    intro(t) { st.introT = t == null ? null : clamp(Number(t) || 0, 0, 1); return st.introT; },
+    get particles() { return st.fx ? st.fx.mesh.count : 0; },
     dispose,
     get quality() { return st.quality; },
     get showLine() { return st.showLine; },
