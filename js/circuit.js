@@ -1,9 +1,10 @@
 // Closed-circuit tracks for the "サーキット" mode: one lap is generated, then tiled `laps` times.
 // The returned object is compatible with generateCourse() (segments, goalIndex, goalZ, def, rivals, ...).
 import { makeRng } from './rng.js';
-import { SEGMENT_LENGTH, easeInOut } from './physics.js';
+import { SEGMENT_LENGTH } from './physics.js';
 import { gridSlots } from './ai.js';
 import { START_LINE, RIVAL_ANIMALS, hashString } from './course.js';
+import { buildTrack, frameAt, elevationAt, curvatureBetween } from './track3d.js';
 
 export const CIRCUITS = {
   coast: {
@@ -13,9 +14,7 @@ export const CIRCUITS = {
     night: false,
     base: 'sea', // fallback palette / scenery family
     music: 'sea',
-    lapLength: 330,
-    sharpness: [2.2, 4.4],
-    hills: 0.35,
+    sharpness: [1.2, 6],
     deco: ['palm', 'palm', 'bush', 'lighthouse'],
   },
   mountain: {
@@ -25,13 +24,13 @@ export const CIRCUITS = {
     night: false,
     base: 'meadow',
     music: 'meadow',
-    lapLength: 360,
-    sharpness: [2.6, 4.8],
-    hills: 0.6,
+    sharpness: [1.2, 6],
     deco: ['pine', 'tree', 'tree', 'bush'],
   },
 };
 export const CIRCUIT_IDS = Object.keys(CIRCUITS);
+// Lap length in segments follows from the 3D layout.
+for (const def of Object.values(CIRCUITS)) def.lapLength = Math.round(buildTrack(def.id).length / 5);
 
 export const CAR_MODEL_IDS = ['gt', 'proto', 'hatch'];
 // Kept local so this module has no dependency on the drawing code.
@@ -66,56 +65,33 @@ export function brakeProfile(curves, lapLength) {
   return out;
 }
 
-/** Build one lap: returns arrays of curve / height per lap position (0 = the start line). */
-function buildLap(def, rng) {
-  const L = def.lapLength;
+/** Curve value (the pseudo-3D scale used by physics/AI/rendering) per 1/m of curvature. */
+export const CURVE_PER_CURVATURE = 175;
+/** Curvature below this is treated as straight (keeps the main straight exactly straight). */
+const STRAIGHT_CURVE = 0.12;
+/** Metres of track per segment (nominal; the exact value is course.metersPerSegment). */
+export const METERS_PER_SEGMENT = 5;
+
+/**
+ * Build one lap from the closed 3D layout: curve / height per lap position (0 = the start line).
+ * Heights are in world units (SEGMENT_LENGTH per segment), i.e. metres * SEGMENT_LENGTH / mps.
+ */
+function buildLap(def) {
+  const track = buildTrack(def.id);
+  const L = Math.round(track.length / METERS_PER_SEGMENT);
+  const mps = track.length / L;
+  const unitsPerMetre = SEGMENT_LENGTH / mps;
   const curve = [];
   const y = [];
-  let lastY = 0;
-  const add = (c, h) => {
-    curve.push(c);
-    y.push(h);
-    lastY = h;
-  };
-  const addRoad = (enter, hold, leave, c, hill) => {
-    const startY = lastY;
-    const endY = startY + hill * SEGMENT_LENGTH;
-    const total = enter + hold + leave;
-    for (let n = 0; n < enter; n++) add(easeInOut(0, c, n / enter), easeInOut(startY, endY, n / total));
-    for (let n = 0; n < hold; n++) add(c, easeInOut(startY, endY, (enter + n) / total));
-    for (let n = 0; n < leave; n++) add(easeInOut(c, 0, n / leave), easeInOut(startY, endY, (enter + hold + n) / total));
-  };
-  // Main straight after the line.
-  addRoad(4, 44, 4, 0, 0);
-  const endStraight = 46; // the lap finishes on the main straight (before the line)
-  let side = rng.chance(0.5) ? 1 : -1;
-  while (curve.length < L - endStraight - 20) {
-    const room = L - endStraight - curve.length;
-    const len = Math.min(room, rng.int(28, 60));
-    const enter = Math.floor(len * 0.3);
-    const leave = Math.floor(len * 0.3);
-    const hold = Math.max(0, len - enter - leave);
-    let c = 0;
-    if (rng.chance(0.7)) {
-      c = side * rng.range(def.sharpness[0], def.sharpness[1]);
-      // Mostly alternate, sometimes a double corner the same way.
-      if (rng.chance(0.75)) side = -side;
-    }
-    const hill = rng.chance(def.hills) ? rng.range(-1, 1) * rng.range(1, 3) : 0;
-    addRoad(enter, hold, leave, c, hill);
-    // A short straight between corners gives room to brake.
-    if (curve.length < L - endStraight - 12) addRoad(2, rng.int(4, 12), 2, 0, 0);
+  for (let p = 0; p < L; p++) {
+    let c = CURVE_PER_CURVATURE * curvatureBetween(track, p * mps, (p + 1) * mps);
+    if (Math.abs(c) < STRAIGHT_CURVE) c = 0;
+    curve.push(Math.max(-6, Math.min(6, c)));
+    // y[p] is the height at the END of lap segment p
+    y.push(elevationAt(track, (p + 1) * mps) * unitsPerMetre);
   }
-  // Return to height 0 and pad the main straight up to exactly L.
-  const rest = L - curve.length;
-  const a = Math.floor(rest / 3);
-  addRoad(a, rest - 2 * a, a, 0, -lastY / SEGMENT_LENGTH);
-  while (curve.length > L) {
-    curve.pop();
-    y.pop();
-  }
-  y[L - 1] = 0;
-  return { curve, y };
+  y[L - 1] = 0; // the lap closes exactly at the line
+  return { curve, y, track, mps };
 }
 
 /**
@@ -128,7 +104,7 @@ export function generateCircuit(id, opts = {}) {
   const laps = Math.max(1, Math.floor(opts.laps ?? 3));
   const seed = opts.seed ?? hashString(def.id) + 7;
   const rng = makeRng(seed);
-  const lap = buildLap(def, rng);
+  const lap = buildLap(def);
   const L = lap.curve.length;
   const goalIndex = START_LINE + laps * L;
   const total = goalIndex + RUN_OUT;
@@ -195,6 +171,20 @@ export function generateCircuit(id, opts = {}) {
     brake: brakeProfile(curves, L),
     startLines: Array.from({ length: laps + 1 }, (_, k) => START_LINE + k * L),
     counts: { star: 0, fruit: 0, boost: 0, obstacle: 0, sign: 0, ramp: 0, board: 0, gravel: 0 },
+    // 3D geometry (track3d.js): the race keeps z/x, the 3D view maps them onto this loop.
+    track: lap.track,
+    metersPerSegment: lap.mps,
+  };
+  /** Race coordinates → track coordinates: s in metres within the lap (0 = the line), x unchanged. */
+  course.toTrack = (z, x = 0) => {
+    const seg = z / SEGMENT_LENGTH - START_LINE;
+    const len = lap.track.length;
+    return { s: (((seg * lap.mps) % len) + len) % len, x };
+  };
+  /** World frame of race position (z, x) on the 3D loop (see track3d.frameAt). */
+  course.frameAt = (z, x = 0) => {
+    const t = course.toTrack(z, x);
+    return frameAt(lap.track, t.s, t.x);
   };
 
   dressCircuit(course, lapCorners, rng);

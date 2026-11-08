@@ -132,7 +132,7 @@ const LINE_COLS = { go: 'rgba(58,160,255,', ease: 'rgba(255,205,40,', brake: 'rg
 export class Renderer {
   constructor(canvas) {
     this.cv = canvas;
-    this.c = canvas.getContext('2d', { alpha: false });
+    this.c = canvas.getContext('2d'); // with alpha: the 3D circuit view shows through in HUD-only mode
     this.dpr = 1;
     this.W = 1;
     this.H = 1;
@@ -424,6 +424,25 @@ export class Renderer {
     } else if (race.rank !== this._lastRank) {
       this._lastRank = race.rank;
       this.rankPulse = 1;
+    }
+    if (this.hudOnly) {
+      // a WebGL view (circuit 3D) draws the world underneath; only the HUD goes here
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, this.cv.width, this.cv.height);
+      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      if (this.replayMode) return;
+      let done = false;
+      if (isCircuit(race) && MOD.simhud && !this._simFail) {
+        try {
+          MOD.simhud.drawSimHud(this, race, t);
+          done = true;
+        } catch (e) {
+          this._simFail = true;
+        }
+      }
+      if (!done) this.drawHud(race, t);
+      drawPhotoFinish(this, race, t);
+      return;
     }
     this.tuneQuality(dt, t);
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);

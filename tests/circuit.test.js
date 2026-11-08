@@ -108,8 +108,10 @@ test('deterministic for the same seed, different for another seed', () => {
   assert.deepEqual(a.segments.map((s) => s.curve), b.segments.map((s) => s.curve));
   assert.deepEqual(a.rivals, b.rivals);
   assert.deepEqual(Array.from(a.brake), Array.from(b.brake));
+  // The layout is a fixed 3D circuit; the seed only changes the grid (cars) and trackside dressing.
   const d = generateCircuit('coast', { laps: 3, seed: 12 });
-  assert.notDeepEqual(a.segments.map((s) => s.curve), d.segments.map((s) => s.curve));
+  assert.deepEqual(a.segments.map((s) => s.curve), d.segments.map((s) => s.curve));
+  assert.notDeepEqual(a.rivals, d.rivals);
   // unknown id falls back
   assert.equal(generateCircuit('nope', { seed: 1 }).id, 'coast');
 });

@@ -969,3 +969,10 @@ body.circuit-mode .goal-hero canvas, body.circuit-mode .medal { max-height: 22vh
 #scr-race .round-btn.cam { top: auto; right: auto; left: calc(var(--sal) + 22px); bottom: calc(var(--sab) + 196px); width: 56px; height: 56px; }
 @media (max-height: 430px) { #scr-race .round-btn.cam { bottom: calc(var(--sab) + 172px); width: 46px; height: 46px; } }
 @media (orientation: landscape) and (max-height: 560px) { #scr-garage .garage-stage { height: 100%; } }
+
+/* ---- 第6弾: 3D サーキット（WebGL） ---- */
+#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: none; touch-action: none; }
+body.gl3d.racing #gl { display: block; }
+body.gl3d.racing #game { background: transparent; }
+#garage-gl { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; border-radius: 18px; }
+.garage-stage.gl3d #garage-car, .garage-stage.gl3d .turntable { display: none; }

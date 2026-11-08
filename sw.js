@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the game works offline.
 // HTML/JS/CSS use network-first (fresh when online), icons cache-first.
-const VERSION = 'buubuu-v8-circuit';
+const VERSION = 'buubuu-v9-3d';
 const SHELL = [
   './',
   './index.html',
@@ -37,6 +37,13 @@ const SHELL = [
   './js/storage.js',
   './js/voice.js',
   './js/voice-lines.js',
+  './js/track3d.js',
+  './js/car3d.js',
+  './js/world3d.js',
+  './js/view3d.js',
+  './js/garage3d.js',
+  './js/vendor/three.module.js',
+  './js/vendor/three.core.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

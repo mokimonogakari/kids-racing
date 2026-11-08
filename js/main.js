@@ -133,6 +133,7 @@ function show(name) {
     sound.crowdAmbience?.(false);
   }
   if (name !== 'garage') stopGarageSpin();
+  if (!(app.mode === 'circuit' && ['race', 'goal', 'replay'].includes(name))) detach3D();
 }
 
 function go(name) {
@@ -709,6 +710,167 @@ const gtReady = Promise.all([
   import('./art-gt.js').then((m) => (gt.art = m)).catch(() => {}),
   import('./replay.js').then((m) => (gt.replay = m)).catch(() => {}),
 ]);
+// ---- real 3D (WebGL / Three.js) for the circuit mode. Any failure falls back to the 2D view.
+const NO3D = params.get('no3d') === '1';
+const g3 = { view: null, garage: null, viewP: null, garageP: null, on: false, failed: false, gFailed: false, garageOn: false, gLast: 0 };
+function webglOK() {
+  if (NO3D) return false;
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch (e) {
+    return false;
+  }
+}
+const HAS_GL = webglOK();
+/** Car colour id ('red') or hex → hex. */
+function carHex(color) {
+  if (typeof color === 'string' && color[0] === '#') return color;
+  const list = (gt.art && gt.art.CAR_COLORS) || [];
+  const hit = list.find((c) => c.id === color);
+  return hit ? hit.hex : '#d3172b';
+}
+function withHex(car) {
+  const c = car || { model: 'gt', color: 'red', number: 1 };
+  return { ...c, hex: carHex(c.color) };
+}
+function loadView3D() {
+  if (!HAS_GL || g3.failed) return Promise.resolve(null);
+  if (!g3.viewP) {
+    g3.viewP = import('./view3d.js')
+      .then(async (m) => {
+        const v = m.createView3D($('#gl'));
+        if (!v || v.supported === false) throw new Error('no webgl');
+        await v.ready;
+        v.resize?.(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
+        g3.view = v;
+        return v;
+      })
+      .catch((e) => {
+        console.warn('3D view unavailable', e);
+        g3.failed = true;
+        return null;
+      });
+  }
+  return g3.viewP;
+}
+function loadGarage3D() {
+  if (!HAS_GL || g3.gFailed) return Promise.resolve(null);
+  if (!g3.garageP) {
+    g3.garageP = import('./garage3d.js')
+      .then(async (m) => {
+        const cv = $('#garage-gl');
+        cv.hidden = false;
+        const g = m.createGarage3D(cv);
+        if (!g || g.supported === false) throw new Error('no webgl');
+        await g.ready;
+        g3.garage = g;
+        return g;
+      })
+      .catch((e) => {
+        console.warn('3D garage unavailable', e);
+        g3.gFailed = true;
+        $('#garage-gl').hidden = true;
+        return null;
+      });
+  }
+  return g3.garageP;
+}
+/** Hand the circuit race to the 3D view (if it is ready); the 2D canvas keeps only the HUD. */
+function attach3D(race) {
+  if (!g3.view || !race || app.mode !== 'circuit' || g3.failed) return false;
+  try {
+    g3.view.start(race, {
+      car: withHex(app.car),
+      rivals: race.rivals.map((r) => withHex(r.car)),
+    });
+    g3.view.setCamera?.(renderer.camMode && ['chase', 'far', 'bumper'].includes(renderer.camMode) ? renderer.camMode : 'chase');
+    g3.view.setReplay?.(false);
+    g3.on = true;
+    g3.race = race;
+    renderer.hudOnly = true;
+    document.body.classList.add('gl3d');
+    return true;
+  } catch (e) {
+    console.warn('3D start failed', e);
+    fail3D();
+    return false;
+  }
+}
+function detach3D() {
+  g3.on = false;
+  g3.race = null;
+  renderer.hudOnly = false;
+  document.body.classList.remove('gl3d');
+}
+function fail3D() {
+  g3.failed = true;
+  detach3D();
+}
+/** Draw the 3D world for this frame; returns false when the 2D view must draw instead. */
+function render3D(race, dt, t) {
+  if (!g3.on || g3.race !== race) return false;
+  try {
+    g3.view.render(race, dt, t);
+    return true;
+  } catch (e) {
+    console.warn('3D render failed', e);
+    fail3D();
+    return false;
+  }
+}
+// 3D garage: spins on its own loop while the garage is open
+function garage3DShow() {
+  loadGarage3D().then((g) => {
+    if (!g || app.screen !== 'garage') return;
+    const stage = $('.garage-stage');
+    stage.classList.add('gl3d');
+    try {
+      const r = stage.getBoundingClientRect();
+      g.resize?.(r.width, r.height, window.devicePixelRatio || 1);
+      g.show(app.car.model, carHex(app.car.color), app.car.number);
+    } catch (e) {
+      g3.gFailed = true;
+      stage.classList.remove('gl3d');
+      $('#garage-gl').hidden = true;
+      return;
+    }
+    if (!g3.garageOn) {
+      g3.garageOn = true;
+      g3.gLast = 0;
+      requestAnimationFrame(garageLoop);
+    }
+  });
+}
+function garageLoop(ts) {
+  if (app.screen !== 'garage' || !g3.garage || g3.gFailed) {
+    g3.garageOn = false;
+    return;
+  }
+  const dt = g3.gLast ? Math.min(0.05, (ts - g3.gLast) / 1000) : 1 / 60;
+  g3.gLast = ts;
+  try {
+    g3.garage.render(dt);
+  } catch (e) {
+    console.warn('3D garage render failed', e);
+    g3.gFailed = true;
+    g3.garageOn = false;
+    $('.garage-stage').classList.remove('gl3d');
+    $('#garage-gl').hidden = true;
+    return;
+  }
+  requestAnimationFrame(garageLoop);
+}
+function garage3DSync() {
+  if (!g3.garage || g3.gFailed || app.screen !== 'garage') return;
+  try {
+    g3.garage.setModel?.(app.car.model);
+    g3.garage.setColor?.(carHex(app.car.color));
+  } catch (e) {
+    /* the 2D picture stays as a fallback */
+  }
+}
+
 const CIRCUIT_FALLBACK = {
   coast: { id: 'coast', label: 'うみぞい サーキット', base: 'sea', music: 'sea' },
   mountain: { id: 'mountain', label: 'やまの サーキット', base: 'meadow', music: 'meadow' },
@@ -840,9 +1002,12 @@ function syncGarage() {
       .join('');
   }
   paintGarageCar();
+  garage3DSync();
 }
 function openGarage() {
   show('garage');
+  garage3DShow();
+  loadView3D(); // warm up the 3D race view while the child picks a car
   gtReady.then(() => {
     if (app.screen !== 'garage') return;
     buildGarage();
@@ -1006,6 +1171,14 @@ function startCircuitRace() {
     hooks: circuitHooks(),
   });
   if (!app.race.playerCar) app.race.playerCar = { ...app.car };
+  {
+    const race = app.race;
+    if (!attach3D(race)) {
+      loadView3D().then((v) => {
+        if (v && app.race === race && ['race', 'goal'].includes(app.screen)) attach3D(race);
+      });
+    }
+  }
   renderer.camMode = renderer.camMode && renderer.camMode !== 'tv' && renderer.camMode !== 'heli' ? renderer.camMode : 'chase';
   show('race');
   const def = circuitDefs()[app.circuit] || {};
@@ -1025,6 +1198,7 @@ const CAM_MODES = ['chase', 'far', 'bumper'];
 function cycleCamera() {
   const i = CAM_MODES.indexOf(renderer.camMode);
   renderer.camMode = CAM_MODES[(i + 1) % CAM_MODES.length];
+  if (g3.on) g3.view.setCamera?.(renderer.camMode);
   flashText({ chase: 'カメラ うしろ', far: 'カメラ とおく', bumper: 'カメラ まえ' }[renderer.camMode]);
 }
 
@@ -1111,6 +1285,11 @@ function replayFrame(ts) {
   renderer.camMode = rp.camera;
   renderer.steer = race.player.steer || 0;
   renderer.dt = dt;
+  if (g3.on) {
+    g3.view.setReplay?.(true);
+    g3.view.setCamera?.(rp.camera);
+  }
+  render3D(race, dt, ts / 1000);
   renderer.draw(race, ts / 1000);
   const max = (race.playerPreset && race.playerPreset.maxSpeed) || (race.preset && race.preset.maxSpeed) || 1;
   sound.engineSet(Math.min(1.5, race.player.speed / max), {});
@@ -1129,6 +1308,14 @@ function endReplay() {
   app.replaySaved = null;
   renderer.replayMode = false;
   renderer.camMode = 'chase';
+  if (g3.on) {
+    try {
+      g3.view.setReplay?.(false);
+      g3.view.setCamera?.('chase');
+    } catch (e) {
+      fail3D();
+    }
+  }
   sound.engineStop();
   if (app.screen === 'replay') {
     if (app.lastResult) showGoal();
@@ -1443,6 +1630,7 @@ function frame(ts) {
   announcer.tick();
   renderer.steer = steer;
   renderer.dt = dt;
+  render3D(app.race, dt, ts / 1000);
   renderer.draw(app.race, ts / 1000);
   const p = app.race.player;
   sound.engineSet(Math.min(1.5, app.race.speedPct), { boost: p.boost > 0, offroad: !!p.offroad, drift: !!p.drift });
@@ -1472,6 +1660,15 @@ function readSafe() {
 let resizeTimer = 0;
 function onResize() {
   renderer.resize(readSafe());
+  try {
+    g3.view?.resize?.(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
+    if (g3.garage && app.screen === 'garage') {
+      const r = $('.garage-stage').getBoundingClientRect();
+      g3.garage.resize?.(r.width, r.height, window.devicePixelRatio || 1);
+    }
+  } catch (e) {
+    /* 3D is optional */
+  }
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     paintMenus();
@@ -1758,4 +1955,5 @@ window.__kr = {
   settings,
   fps,
   renderer,
+  g3,
 };
