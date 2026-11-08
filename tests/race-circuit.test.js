@@ -137,3 +137,18 @@ test('normal races are unchanged: no replay, no laps, cosmetic gauge scale kept'
   assert.ok(race.kmh <= 175);
   assert.deepEqual(race.result().lapTimes, []);
 });
+
+test('circuit tuning only applies on circuits and keeps easy < normal < hard pace', async () => {
+  const { AI_LEVELS, AI_LEVEL_IDS, effectiveLevel } = await import('../js/ai.js');
+  for (const id of AI_LEVEL_IDS) {
+    assert.equal(effectiveLevel({ level: AI_LEVELS[id] }), AI_LEVELS[id], 'normal courses use the plain level');
+    const c = effectiveLevel({ level: AI_LEVELS[id], brake: new Float32Array(4) });
+    assert.notEqual(c, AI_LEVELS[id]);
+    assert.ok(c.skillMul > 0.5 && c.skillMul <= 1);
+  }
+  const pace = (id) => {
+    const c = effectiveLevel({ level: AI_LEVELS[id], brake: [1] });
+    return ((c.skill[0] + c.skill[1]) / 2) * c.skillMul;
+  };
+  assert.ok(pace('easy') < pace('normal') && pace('normal') < pace('hard'));
+});

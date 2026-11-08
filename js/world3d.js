@@ -73,11 +73,12 @@ function asphaltTexture(THREE, r, quality) {
   // u: across the 14 m road, v: 16 m along it.
   g.fillStyle = '#434446';
   g.fillRect(0, 0, W, H);
-  // Large blotches (patches / repairs)
-  for (let i = 0; i < 26; i++) {
-    g.fillStyle = r() < 0.5 ? 'rgba(20,22,26,0.10)' : 'rgba(110,112,118,0.07)';
+  // Very soft, low-contrast tonal variation (old repairs / weathering). Kept faint: up close
+  // big blotches read as stains; the fine grain comes from the detail normal/roughness maps.
+  for (let i = 0; i < 14; i++) {
+    g.fillStyle = r() < 0.5 ? 'rgba(20,22,26,0.035)' : 'rgba(110,112,118,0.03)';
     g.beginPath();
-    g.ellipse(r() * W, r() * H, 20 + r() * 70, 10 + r() * 40, r() * 3, 0, Math.PI * 2);
+    g.ellipse(r() * W, r() * H, 30 + r() * 80, 20 + r() * 50, r() * 3, 0, Math.PI * 2);
     g.fill();
   }
   // Rubbered racing line (darker band, slightly off-centre)
@@ -89,8 +90,10 @@ function asphaltTexture(THREE, r, quality) {
   grd.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = grd;
   g.fillRect(W * 0.12, 0, W * 0.76, H);
-  // Aggregate
-  speckle(g, W, H, quality >= 1 ? 30000 : 14000, ['#4c4d50', '#38393c', '#535457', '#424346', '#3a3b3e'], r, 0.9);
+  // Aggregate tint only (sub-pixel, low contrast); the real grain is in the detail maps.
+  g.globalAlpha = 0.35;
+  speckle(g, W, H, quality >= 1 ? 22000 : 10000, ['#48494c', '#3e3f42', '#4a4b4e'], r, 0.2);
+  g.globalAlpha = 1;
   // Edge lines: 0.15..0.45 m in from each edge, slightly worn
   const px = (m) => (m / 14) * W;
   g.fillStyle = '#e9e9e4';
@@ -119,20 +122,64 @@ function asphaltTexture(THREE, r, quality) {
   return makeTex(THREE, cv);
 }
 
-function asphaltRough(THREE, r) {
-  const cv = canvas(256, 256);
-  const g = cv.getContext('2d');
-  g.fillStyle = '#d8d8d8';
-  g.fillRect(0, 0, 256, 256);
-  // racing line is smoother (polished by rubber)
-  const grd = g.createLinearGradient(0, 0, 256, 0);
-  grd.addColorStop(0.15, 'rgba(120,120,120,0)');
-  grd.addColorStop(0.5, 'rgba(120,120,120,0.55)');
-  grd.addColorStop(0.85, 'rgba(120,120,120,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, 256, 256);
-  speckle(g, 256, 256, 6000, ['#ffffff', '#b0b0b0', '#e8e8e8'], r, 1.2);
-  return makeTex(THREE, cv, { srgb: false });
+// Fine aggregate detail: a tiling height field (~1 m per tile) turned into a normal map and a
+// matching roughness map. Tiled many times along the road via its own texture transform, so the
+// grain stays a few millimetres in size even right in front of the camera.
+function asphaltDetail(THREE, r, size = 256) {
+  const N = size;
+  const h = new Float32Array(N * N);
+  // stones: small rounded bumps of varied size
+  const stones = Math.floor(N * N * 0.09);
+  for (let i = 0; i < stones; i++) {
+    const cx = r() * N;
+    const cy = r() * N;
+    const rad = 0.6 + r() * r() * 2.4;
+    const amp = 0.35 + r() * 0.65;
+    const x0 = Math.floor(cx - rad - 1);
+    const y0 = Math.floor(cy - rad - 1);
+    for (let y = y0; y <= cy + rad + 1; y++) {
+      for (let x = x0; x <= cx + rad + 1; x++) {
+        const d = Math.hypot(x - cx, y - cy) / rad;
+        if (d >= 1) continue;
+        const idx = ((y + N) % N) * N + ((x + N) % N);
+        h[idx] = Math.max(h[idx], amp * Math.sqrt(1 - d * d));
+      }
+    }
+  }
+  // fine binder noise
+  for (let i = 0; i < N * N; i++) h[i] += (r() - 0.5) * 0.12;
+  const nCv = canvas(N, N);
+  const rCv = canvas(N, N);
+  const ng = nCv.getContext('2d');
+  const rg = rCv.getContext('2d');
+  const nImg = ng.createImageData(N, N);
+  const rImg = rg.createImageData(N, N);
+  const k = 2.2; // bump strength
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const hl = h[y * N + ((x - 1 + N) % N)];
+      const hr = h[y * N + ((x + 1) % N)];
+      const hu = h[((y - 1 + N) % N) * N + x];
+      const hd = h[((y + 1) % N) * N + x];
+      let nx = (hl - hr) * k;
+      let ny = (hd - hu) * k;
+      let nz = 1;
+      const l = Math.hypot(nx, ny, nz);
+      nx /= l; ny /= l; nz /= l;
+      const o = (y * N + x) * 4;
+      nImg.data[o] = (nx * 0.5 + 0.5) * 255;
+      nImg.data[o + 1] = (ny * 0.5 + 0.5) * 255;
+      nImg.data[o + 2] = (nz * 0.5 + 0.5) * 255;
+      nImg.data[o + 3] = 255;
+      // stone tops are a little smoother (polished), binder rougher
+      const rv = Math.max(0, Math.min(255, 238 - h[y * N + x] * 55 + (r() - 0.5) * 18));
+      rImg.data[o] = rImg.data[o + 1] = rImg.data[o + 2] = rv;
+      rImg.data[o + 3] = 255;
+    }
+  }
+  ng.putImageData(nImg, 0, 0);
+  rg.putImageData(rImg, 0, 0);
+  return { normal: makeTex(THREE, nCv, { srgb: false, aniso: 16 }), rough: makeTex(THREE, rCv, { srgb: false, aniso: 16 }) };
 }
 
 function kerbTexture(THREE) {
@@ -758,11 +805,25 @@ export function buildWorld(THREE, track, opts = {}) {
   const groundY = A.minY - 2.5;
 
   // ---------------- materials
+  const maxAniso = (() => {
+    try { return Math.max(1, opts.renderer?.capabilities?.getMaxAnisotropy?.() || 8); } catch (e) { return 8; }
+  })();
   const asphaltMap = keep(asphaltTexture(THREE, r, quality));
+  asphaltMap.anisotropy = maxAniso;
+  // Detail grain: the road UVs span u 0..1 across 14 m and v 1 per 16 m, so repeat 14×16 → 1 m tiles.
+  const detail = asphaltDetail(THREE, r, quality >= 1 ? 256 : 128);
+  keep(detail.normal);
+  keep(detail.rough);
+  for (const tx of [detail.normal, detail.rough]) {
+    tx.repeat.set(14, 16);
+    tx.anisotropy = maxAniso;
+  }
   const roadMat = keep(new THREE.MeshStandardMaterial({
     map: asphaltMap,
-    roughnessMap: keep(asphaltRough(THREE, r)),
-    roughness: 0.92,
+    normalMap: detail.normal,
+    normalScale: new THREE.Vector2(0.55, 0.55),
+    roughnessMap: detail.rough,
+    roughness: 0.95,
     metalness: 0.0,
     envMapIntensity: 0.35,
   }));

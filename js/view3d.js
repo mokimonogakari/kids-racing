@@ -186,6 +186,8 @@ export function createView3D(canvas) {
     frameTimes: [],
     lastQChange: 0,
     shake: 0,
+    showLine: true,
+    line: null,
   };
   try {
     const q = new URLSearchParams(location.search).get('q');
@@ -279,10 +281,146 @@ export function createView3D(canvas) {
     return '#d62828';
   }
 
+  /* ---------------- racing line (driving aid) ----------------
+   * A translucent band on the road showing where to drive and how fast: blue = flat out,
+   * yellow = lifting, red = the auto-brake zone (from course.brake). It hugs the inside of
+   * corners. Built once per race for 1 lap + the look-ahead window, then only a window
+   * ahead of the player is drawn (geometry.drawRange), so it costs nothing per frame. */
+  const LINE_STEP = 2; // m per row
+  const LINE_AHEAD = 300; // m shown ahead of the player
+  let arrowTex = null;
+  function arrowTexture() {
+    if (arrowTex) return arrowTex;
+    const cv = document.createElement('canvas');
+    cv.width = 64;
+    cv.height = 128;
+    const g = cv.getContext('2d');
+    g.clearRect(0, 0, 64, 128);
+    // one chevron per tile, pointing "up" the texture (= forward along the track)
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(32, 18);
+    g.lineTo(60, 62);
+    g.lineTo(46, 62);
+    g.lineTo(32, 40);
+    g.lineTo(18, 62);
+    g.lineTo(4, 62);
+    g.closePath();
+    g.fill();
+    arrowTex = new THREE.CanvasTexture(cv);
+    arrowTex.wrapS = arrowTex.wrapT = THREE.RepeatWrapping;
+    arrowTex.anisotropy = 8;
+    return arrowTex;
+  }
+
+  function lineColor(b) {
+    if (b >= 0.93) return [0.16, 0.55, 1.0];
+    if (b >= 0.8) return [1.0, 0.82, 0.12];
+    return [1.0, 0.18, 0.14];
+  }
+
+  function brakeAt(course, s) {
+    const br = course.brake;
+    if (!br || !br.length) return 1;
+    const mps = course.metersPerSegment || M_PER_SEG;
+    const L = course.lapLength || Math.round(st.track.length / mps);
+    const start = course.startLines?.[0] ?? 0;
+    const lapOff = (course.laps || 1) > 1 ? L : 0; // use lap 2 (no grid effects)
+    const i = start + lapOff + Math.floor((((s % st.track.length) + st.track.length) % st.track.length) / mps);
+    const v = br[Math.min(br.length - 1, Math.max(0, i))];
+    return Number.isFinite(v) ? v : 1;
+  }
+
+  function buildRacingLine(race) {
+    const track = st.track;
+    const course = race.course;
+    const L = track.length;
+    const S = track.samples || [];
+    // smoothed curvature (±35 m window) → inside offset
+    const n = S.length || 1;
+    const curvAvg = (s) => {
+      const i = Math.floor(((s % L) + L) % L) % n;
+      const w = 35;
+      let sum = 0;
+      let cnt = 0;
+      for (let k = -w; k <= w; k += 5) { sum += S[(i + k + n * 4) % n]?.curv || 0; cnt++; }
+      return sum / cnt;
+    };
+    const total = L + LINE_AHEAD + 20;
+    const rows = Math.ceil(total / LINE_STEP) + 1;
+    const mk = (half) => {
+      const pos = new Float32Array(rows * 2 * 3);
+      const col = new Float32Array(rows * 2 * 3);
+      const uv = new Float32Array(rows * 2 * 2);
+      const idx = [];
+      for (let r = 0; r < rows; r++) {
+        const sr = r * LINE_STEP;
+        const off = clamp(curvAvg(sr) * 22, -0.5, 0.5);
+        const c = lineColor(brakeAt(course, sr));
+        for (let side = 0; side < 2; side++) {
+          const xm = off * HALF_W + (side ? half : -half);
+          const f = frameAt(sr, xm / HALF_W);
+          const o = (r * 2 + side) * 3;
+          pos[o] = f.pos[0] + f.up[0] * 0.035;
+          pos[o + 1] = f.pos[1] + f.up[1] * 0.035;
+          pos[o + 2] = f.pos[2] + f.up[2] * 0.035;
+          col[o] = c[0]; col[o + 1] = c[1]; col[o + 2] = c[2];
+          uv[(r * 2 + side) * 2] = side;
+          uv[(r * 2 + side) * 2 + 1] = sr / 7; // one arrow every 7 m
+        }
+        if (r < rows - 1) {
+          const a = r * 2;
+          idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeBoundingSphere();
+      return g;
+    };
+    const bandMat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, fog: true, toneMapped: false,
+    });
+    const arrowMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, alphaMap: arrowTexture(), transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, fog: true, toneMapped: false,
+    });
+    const band = new THREE.Mesh(mk(0.8), bandMat);
+    const arrows = new THREE.Mesh(mk(0.45), arrowMat);
+    band.renderOrder = 2;
+    arrows.renderOrder = 3;
+    band.frustumCulled = false;
+    arrows.frustumCulled = false;
+    const grp = new THREE.Group();
+    grp.name = 'racingLine';
+    grp.add(band, arrows);
+    grp.userData = { band, arrows, rows, L };
+    return grp;
+  }
+
+  function updateRacingLine(race) {
+    const ln = st.line;
+    if (!ln) return;
+    const show = st.showLine && !st.replay && race.state !== 'goal';
+    ln.visible = show;
+    if (!show) return;
+    const tt = toTrack(race.player.z, 0);
+    const s0 = Math.max(0, tt.s - 6);
+    const r0 = Math.floor(s0 / LINE_STEP);
+    const count = Math.ceil((LINE_AHEAD + 6) / LINE_STEP);
+    const r1 = Math.min(ln.userData.rows - 1, r0 + count);
+    for (const m of [ln.userData.band, ln.userData.arrows]) m.geometry.setDrawRange(r0 * 6, Math.max(0, r1 - r0) * 6);
+  }
+
   function clearRace() {
     for (const c of st.cars) { scene.remove(c.obj); disposeObj(c.obj); }
     st.cars = [];
     st.playerBox = null;
+    if (st.line) { scene.remove(st.line); disposeObj(st.line); st.line = null; }
     if (st.world) { scene.remove(st.world.group); try { st.world.dispose(); } catch (e) { /* ignore */ } st.world = null; }
   }
 
@@ -318,6 +456,7 @@ export function createView3D(canvas) {
     if (!world) world = fallbackWorld(track);
     st.world = world;
     scene.add(world.group);
+    try { st.line = buildRacingLine(race); scene.add(st.line); } catch (e) { console.warn('racing line failed', e); st.line = null; }
     // The real world brings its own sun, sky light, fog, environment and exposure.
     const own = !!world.sun;
     sun.visible = !own;
@@ -350,6 +489,8 @@ export function createView3D(canvas) {
     });
     st.camInit = false;
     st.tvPoint = null;
+    st.lastFrameAt = null;
+    st.frameTimes.length = 0;
     if (!st.composer) buildComposer();
   }
 
@@ -436,9 +577,14 @@ export function createView3D(canvas) {
       const bb = st.playerBox || (st.playerBox = localBox(pc));
       const front = bb.max.z;
       const hood = bb.min.y + (bb.max.y - bb.min.y) * 0.62;
-      desired = pos.clone().addScaledVector(fwd, front - 1.35).addScaledVector(up, hood + 0.6);
-      look = pos.clone().addScaledVector(fwd, front + 28).addScaledVector(up, 0.2);
-      fov = 68 + 10 * pct;
+      // Eye just above the bonnet, looking straight down the road: the horizon sits a
+      // little above the middle of the frame (~45%) and only the tip of the bonnet shows.
+      const portrait = camera.aspect < 1;
+      const eye = hood + (portrait ? 0.42 : 0.3);
+      desired = pos.clone().addScaledVector(fwd, front - 1.1).addScaledVector(up, eye);
+      const pitch = (portrait ? 3.2 : 3.4) * Math.PI / 180; // look slightly down
+      look = desired.clone().addScaledVector(fwd, 40).addScaledVector(up, -40 * Math.tan(pitch));
+      fov = (portrait ? 64 : 50) + 8 * Math.min(1, pct);
       k = 40;
     } else if (mode === 'heli') {
       const tt = toTrack(p.z, 0);
@@ -462,9 +608,16 @@ export function createView3D(canvas) {
       fov = clamp(1400 / Math.max(10, d), 8, 50);
       k = 1000;
     } else {
-      desired = pos.clone().addScaledVector(fwd, -5.6).addScaledVector(up, 1.65);
-      look = pos.clone().addScaledVector(fwd, 4).addScaledVector(up, 0.75);
-      fov = 60 + 12 * Math.min(1, pct) + (p.boost > 0 ? 6 : 0);
+      // Racing-game chase camera: low and close, pitched just below level, so the car sits in
+      // the lower part of the frame (roof a little below the middle) with the road ahead above it.
+      // Portrait screens have a tall vertical field of view, so they get their own numbers.
+      const portrait = camera.aspect < 1;
+      const dist = portrait ? 6.0 : 6.4;
+      const height = portrait ? 2.1 : 2.15;
+      const pitch = (portrait ? 3.0 : 4.5) * Math.PI / 180;
+      desired = pos.clone().addScaledVector(fwd, -dist).addScaledVector(up, height);
+      look = desired.clone().addScaledVector(fwd, 30).addScaledVector(up, -30 * Math.tan(pitch));
+      fov = (portrait ? 58 : 46) + (portrait ? 8 : 10) * Math.min(1, pct) + (p.boost > 0 ? 5 : 0);
       k = 9;
     }
     // Move the smoothed camera with the car first so the spring only smooths the offset
@@ -521,9 +674,16 @@ export function createView3D(canvas) {
     return b;
   }
 
-  function autoQuality(dt) {
-    if (st.qualityLock) return;
-    st.frameTimes.push(dt);
+  // Measure the real time between frames (the dt passed in is clamped by the caller,
+  // so it cannot show that the device is struggling).
+  function autoQuality() {
+    const now0 = performance.now();
+    const last = st.lastFrameAt;
+    st.lastFrameAt = now0;
+    if (st.qualityLock || last == null) return;
+    const real = (now0 - last) / 1000;
+    if (real > 0.5) return; // tab was hidden / paused: not a performance signal
+    st.frameTimes.push(real);
     if (st.frameTimes.length < 60) return;
     const avg = st.frameTimes.reduce((a, b) => a + b, 0) / st.frameTimes.length;
     st.frameTimes.length = 0;
@@ -541,10 +701,11 @@ export function createView3D(canvas) {
     dt = clamp(dt, 0, 0.1);
     updateCars(race, dt);
     updateCamera(race, dt);
+    updateRacingLine(race);
     try { st.world?.update?.(st.cars[0]?.obj?.position || camera.position, t, { race, camera, quality: st.quality }); } catch (e) { /* ignore */ }
     if (st.composer) st.composer.render(dt);
     else renderer.render(scene, camera);
-    autoQuality(dt);
+    autoQuality();
   }
 
   function setCamera(mode) {
@@ -588,6 +749,8 @@ export function createView3D(canvas) {
     shake(k = 1) { st.shake = Math.max(st.shake, 0.4 * k); },
     dispose,
     get quality() { return st.quality; },
+    get showLine() { return st.showLine; },
+    set showLine(v) { st.showLine = !!v; },
     get camMode() { return st.camMode; },
     get renderer() { return renderer; },
     get scene() { return scene; },

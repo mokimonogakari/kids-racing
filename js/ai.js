@@ -39,6 +39,22 @@ export const AI_LEVELS = {
 };
 export const AI_LEVEL_IDS = Object.keys(AI_LEVELS);
 
+/**
+ * Circuit mode (3D laps, auto-brake) overrides. Laps are long and a small child spends a lot of
+ * time on the grass there, so leaders are held back harder and pace is scaled by skillMul.
+ * Only used when the race passes ctx.brake (circuit); the normal course values above are untouched.
+ */
+export const CIRCUIT_TUNE = {
+  easy: { skillMul: 0.76, band: 0.24, hold: 0.32, floor: 0.5, lead: 0.0, hover: 700 },
+  normal: { skillMul: 0.745, band: 0.2, hold: 0.3, floor: 0.52, lead: 0.0, hover: 650 },
+  hard: { skillMul: 0.736, band: 0.16, hold: 0.25, floor: 0.55, lead: 0.03, hover: 560 },
+};
+const CIRCUIT_LEVELS = new Map(AI_LEVEL_IDS.map((k) => [AI_LEVELS[k], { ...AI_LEVELS[k], ...CIRCUIT_TUNE[k] }]));
+/** Level parameters in effect for this ctx (circuit overrides when ctx.brake is present). */
+export function effectiveLevel(ctx) {
+  return (ctx.brake && CIRCUIT_LEVELS.get(ctx.level)) || ctx.level;
+}
+
 export const LANES = [-0.62, -0.21, 0.21, 0.62];
 export const RIVAL_W = 0.6; // full width in road units (player is PLAYER_W = 0.62)
 
@@ -136,7 +152,8 @@ function freestLane(r, others) {
  * Returns the same object (mutated).
  */
 export function stepRival(r, ctx, dt) {
-  const { preset, level } = ctx;
+  const { preset } = ctx;
+  const level = effectiveLevel(ctx);
   const max = preset.maxSpeed;
   const p = ctx.player;
   if (r.boost > 0) r.boost = Math.max(0, r.boost - dt);
@@ -225,7 +242,7 @@ export function stepRival(r, ctx, dt) {
   const prog = clamp(r.z / ctx.goalZ, 0, 1);
   const lateK = prog > 0.86 ? level.late : 1;
   const bend = Math.abs(seg.curve || 0) > 1.5;
-  const skillT = max * r.skill * (bend ? tr.corner || 1 : tr.top || 1);
+  const skillT = max * r.skill * (level.skillMul || 1) * (bend ? tr.corner || 1 : tr.top || 1);
   const steadyK = tr.steady ? 0.5 : 1;
   let target;
   if (gap > 0) {

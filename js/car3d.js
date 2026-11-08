@@ -808,7 +808,9 @@ export function createCar(modelId = 'gt', color = '#d3172b', number = 7, opts = 
       if (model.id !== 'hatch') {
         const hd = decalPlane(tex, 0.36);
         hd.position.set(0, hv[5] + 0.016, hoodZ);
-        hd.rotation.x = -Math.PI / 2 + 0.1;
+        // Lie flat on the bonnet, readable from the driver's seat / chase camera:
+        // text top towards the nose (+Z), text reading left-to-right as seen from behind.
+        hd.rotation.set(-Math.PI / 2 - 0.1, Math.PI, 0, 'YXZ');
         group.add(hd);
       }
     }
