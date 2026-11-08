@@ -677,3 +677,203 @@ body.intro .voice-caption{bottom:calc(var(--sab) + 212px)}
 @media(max-height:430px){body.intro .voice-caption{bottom:calc(var(--sab) + 170px)}}
 .voice-caption{position:fixed;z-index:25;left:50%;bottom:calc(var(--sab) + 120px);transform:translateX(-50%);max-width:85vw;padding:9px 16px;border-radius:20px;background:#fffef2ed;color:#3d2c3e;font-size:16px;font-weight:800;text-align:center;pointer-events:none;box-shadow:0 3px 10px #0002}
 @media(max-height:430px){.voice-caption{bottom:calc(var(--sab) + 92px);font-size:14px;padding:5px 12px}}
+
+
+/* ======================================================================
+   第4弾 V7: メニュー・ゴール画面の質感（光・奥行き・立体）
+   ====================================================================== */
+:root {
+  --gloss: radial-gradient(120% 80% at 30% 12%, rgba(255,255,255,.55), rgba(255,255,255,0) 46%);
+  --depth: 0 8px 0 rgba(61,44,62,.32), 0 14px 22px rgba(30,40,80,.18);
+}
+/* 空: 太陽の光と大気の奥行き */
+.menu {
+  background:
+    radial-gradient(circle at 88% 9%, rgba(255,250,214,.95) 0 34px, rgba(255,240,170,.55) 35px, rgba(255,240,170,0) 120px),
+    radial-gradient(ellipse 120% 60% at 50% 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,.35) 100%),
+    linear-gradient(#4fb8ff 0%, #8fd6ff 42%, #d6f2ff 72%, #f2fbff 100%);
+  isolation: isolate;
+}
+.menu::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 800 300%22 preserveAspectRatio=%22xMidYMax slice%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%238ad866%22/%3E%3Cstop offset=%221%22 stop-color=%22%235fbd45%22/%3E%3C/linearGradient%3E%3ClinearGradient id=%22r%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%238d93a3%22/%3E%3Cstop offset=%221%22 stop-color=%22%235d6274%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M0 300V235C120 205 260 215 400 228S660 205 800 230V300Z%22 fill=%22url(%23g)%22/%3E%3Cpath d=%22M372 229C380 228 420 228 428 229L620 300H180Z%22 fill=%22url(%23r)%22/%3E%3Cpath d=%22M372 229L180 300H160L366 229ZM428 229L620 300H640L434 229Z%22 fill=%22%23fff%22/%3E%3Cpath d=%22M366 229L160 300H146L362 229ZM434 229L640 300H654L438 229Z%22 fill=%22%23ff5a6e%22/%3E%3Cpath d=%22M398 231h4l3 10h-10ZM397 247h6l5 16h-16ZM395 272h10l8 28h-26Z%22 fill=%22%23fff%22 opacity=%22.9%22/%3E%3C/svg%3E") center bottom / cover no-repeat, url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 800 300%22 preserveAspectRatio=%22xMidYMax slice%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23b5e69a%22/%3E%3Cstop offset=%221%22 stop-color=%22%2393d873%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M0 300V210C90 170 170 175 250 200S420 160 520 185S700 170 800 195V300Z%22 fill=%22url(%23g)%22/%3E%3Cg fill=%22%236fbf55%22 opacity=%22.85%22%3E%3Ccircle cx=%2290%22 cy=%22196%22 r=%229%22/%3E%3Ccircle cx=%22104%22 cy=%22199%22 r=%227%22/%3E%3Ccircle cx=%22610%22 cy=%22180%22 r=%2210%22/%3E%3Ccircle cx=%22626%22 cy=%22184%22 r=%227%22/%3E%3Ccircle cx=%22420%22 cy=%22182%22 r=%228%22/%3E%3C/g%3E%3C/svg%3E") center bottom / cover no-repeat, url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 800 300%22 preserveAspectRatio=%22xMidYMax slice%22%3E%3Cdefs%3E%3ClinearGradient id=%22m%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%239cc8ea%22/%3E%3Cstop offset=%221%22 stop-color=%22%23c6e4f7%22/%3E%3C/linearGradient%3E%3ClinearGradient id=%22h%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23e8f7ff%22 stop-opacity=%220%22/%3E%3Cstop offset=%221%22 stop-color=%22%23e8f7ff%22 stop-opacity=%22.9%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M0 300V190L70 120L120 160L200 70L270 140L330 100L410 170L480 60L560 150L620 110L700 165L760 120L800 150V300Z%22 fill=%22url(%23m)%22/%3E%3Cpath d=%22M200 70L222 92L210 96L198 88L184 98ZM480 60L503 84L490 88L478 80L463 90Z%22 fill=%22%23fff%22 opacity=%22.9%22/%3E%3Crect y=%22150%22 width=%22800%22 height=%22150%22 fill=%22url(%23h)%22/%3E%3C/svg%3E") center bottom / cover no-repeat;
+  background-size: 100% 70%, 100% 86%, 100% 100%;
+  background-position: center bottom, center bottom, center bottom;
+}
+/* 道はタイトルだけ。ほかの画面は丘のみ */
+.menu:not(#scr-title)::before { background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 800 300%22 preserveAspectRatio=%22xMidYMax slice%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23b5e69a%22/%3E%3Cstop offset=%221%22 stop-color=%22%2393d873%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M0 300V210C90 170 170 175 250 200S420 160 520 185S700 170 800 195V300Z%22 fill=%22url(%23g)%22/%3E%3Cg fill=%22%236fbf55%22 opacity=%22.85%22%3E%3Ccircle cx=%2290%22 cy=%22196%22 r=%229%22/%3E%3Ccircle cx=%22104%22 cy=%22199%22 r=%227%22/%3E%3Ccircle cx=%22610%22 cy=%22180%22 r=%2210%22/%3E%3Ccircle cx=%22626%22 cy=%22184%22 r=%227%22/%3E%3Ccircle cx=%22420%22 cy=%22182%22 r=%228%22/%3E%3C/g%3E%3C/svg%3E") center bottom / 100% 70% no-repeat, url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 800 300%22 preserveAspectRatio=%22xMidYMax slice%22%3E%3Cdefs%3E%3ClinearGradient id=%22m%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%239cc8ea%22/%3E%3Cstop offset=%221%22 stop-color=%22%23c6e4f7%22/%3E%3C/linearGradient%3E%3ClinearGradient id=%22h%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23e8f7ff%22 stop-opacity=%220%22/%3E%3Cstop offset=%221%22 stop-color=%22%23e8f7ff%22 stop-opacity=%22.9%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M0 300V190L70 120L120 160L200 70L270 140L330 100L410 170L480 60L560 150L620 110L700 165L760 120L800 150V300Z%22 fill=%22url(%23m)%22/%3E%3Cpath d=%22M200 70L222 92L210 96L198 88L184 98ZM480 60L503 84L490 88L478 80L463 90Z%22 fill=%22%23fff%22 opacity=%22.9%22/%3E%3Crect y=%22150%22 width=%22800%22 height=%22150%22 fill=%22url(%23h)%22/%3E%3C/svg%3E") center bottom / 100% 100% no-repeat; height: 34%; opacity: .9; }
+.menu::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 85% 75% at 50% 45%, rgba(0,0,0,0) 60%, rgba(20,40,90,.16) 100%);
+}
+.book::before, .book::after { display: none; }
+.book { background: radial-gradient(circle at 20% 10%, #fff 0, rgba(255,255,255,0) 40%), linear-gradient(#ffd0e3, #fff0f6); }
+
+/* 雲: ふんわり陰影 */
+.sky-deco i, .sky-deco i::before, .sky-deco i::after {
+  background: linear-gradient(#fff 55%, #e3f1fb);
+}
+.sky-deco i { box-shadow: 0 10px 18px rgba(60,120,180,.12); }
+
+/* ロゴ: 立体の押し出し＋光沢 */
+.logo .l1 { text-shadow: 0 2px 0 #f0b000, 0 4px 0 #d39200, 0 6px 0 #b77d00, 0 9px 0 rgba(61,44,62,.55), 0 14px 18px rgba(30,40,80,.25); }
+.logo .l2 { text-shadow: 0 2px 0 #e83f72, 0 4px 0 #c92e5d, 0 6px 0 #a8244c, 0 9px 0 rgba(61,44,62,.55), 0 14px 18px rgba(30,40,80,.25); }
+.logo .l3 {
+  background: linear-gradient(#fff 0%, #fff 45%, #ffe8f0 100%);
+  box-shadow: 0 4px 0 #c92e5d, 0 8px 14px rgba(30,40,80,.2), inset 0 2px 0 #fff;
+  position: relative;
+  overflow: hidden;
+}
+.logo .l3::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -40%;
+  width: 30%;
+  background: linear-gradient(100deg, rgba(255,255,255,0), rgba(255,255,255,.95), rgba(255,255,255,0));
+  animation: shine 3.2s ease-in-out infinite 1s;
+}
+@keyframes shine { 0%, 60% { left: -40%; } 100% { left: 120%; } }
+.title-car { filter: drop-shadow(0 18px 10px rgba(20,40,60,.22)); }
+
+/* 丸い大ボタン: 光沢・縁の厚み・押し込み */
+.big-btn {
+  background-image: var(--gloss), linear-gradient(rgba(255,255,255,.15), rgba(0,0,0,.14));
+  box-shadow: 0 8px 0 rgba(61,44,62,.38), 0 16px 22px rgba(30,40,80,.22), inset 0 -8px 0 rgba(0,0,0,.14), inset 0 4px 0 rgba(255,255,255,.35);
+  transition: transform .1s, box-shadow .1s;
+}
+.big-btn:active { transform: translateY(6px) scale(.97); box-shadow: 0 2px 0 rgba(61,44,62,.38), 0 6px 10px rgba(30,40,80,.2), inset 0 -4px 0 rgba(0,0,0,.14); }
+.big-btn svg { filter: drop-shadow(0 3px 0 rgba(0,0,0,.18)); }
+.round-btn {
+  background-image: var(--gloss), linear-gradient(#fff, #efe9f4);
+  box-shadow: 0 6px 0 rgba(61,44,62,.32), 0 12px 16px rgba(30,40,80,.16);
+}
+.round-btn:active { box-shadow: 0 2px 0 rgba(61,44,62,.32), 0 4px 8px rgba(30,40,80,.14); }
+#btn-book { background-image: var(--gloss), linear-gradient(#fff, #ffe6ef); }
+.title-buttons { gap: 16px; }
+#scr-title .big-btn { width: clamp(104px, 30vw, 132px); height: clamp(104px, 30vw, 132px); }
+#scr-title .round-btn { width: clamp(68px, 19vw, 84px); height: clamp(68px, 19vw, 84px); }
+
+/* カード: ガラスの光沢と内側の縁、浮き上がる影 */
+.card {
+  border-color: #fff;
+  box-shadow: 0 7px 0 rgba(61,44,62,.28), 0 14px 22px rgba(30,40,80,.18);
+}
+.card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(160deg, rgba(255,255,255,.42) 0%, rgba(255,255,255,0) 32%), linear-gradient(0deg, rgba(40,30,60,.14) 0%, rgba(40,30,60,0) 28%);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.6), inset 0 -3px 0 rgba(0,0,0,.08);
+}
+.card .label {
+  left: 50%; right: auto; bottom: 7px;
+  transform: translateX(-50%);
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.88);
+  box-shadow: 0 2px 6px rgba(30,40,80,.15);
+  opacity: 1;
+  white-space: nowrap;
+  z-index: 1;
+}
+.card .stats { z-index: 1; box-shadow: 0 2px 6px rgba(30,40,80,.12); }
+.card .stats b { background: linear-gradient(#ff8fb1, var(--pink)); }
+
+/* ゴール系カード: 光る縁と奥行き */
+.goal-card {
+  background: linear-gradient(180deg, rgba(255,255,255,.97) 0%, rgba(250,246,255,.94) 100%);
+  border: 0;
+  box-shadow: 0 0 0 5px #fff, 0 0 0 8px rgba(255,210,63,.55), 0 12px 0 8px rgba(61,44,62,.18), 0 24px 40px rgba(30,40,80,.28);
+  margin: 8px;
+}
+.goal { background: radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.35), rgba(30,40,80,.28)); }
+.gp-title { letter-spacing: .06em; color: var(--ink); text-shadow: 0 2px 0 #ffe066, 0 4px 0 rgba(61,44,62,.15); }
+.medal canvas, #cup-canvas { filter: drop-shadow(0 8px 8px rgba(30,40,80,.25)); }
+.goal-car, #cup-champ { filter: drop-shadow(0 10px 8px rgba(30,40,80,.2)); }
+
+/* 表彰台: 金属の天面・側面 */
+.podium .step .place {
+  border: 0;
+  border-radius: 10px 10px 3px 3px;
+  box-shadow: inset 0 3px 0 rgba(255,255,255,.75), inset 0 -6px 0 rgba(0,0,0,.12), 0 4px 0 rgba(61,44,62,.28), 0 8px 12px rgba(30,40,80,.18);
+  text-shadow: 0 2px 0 rgba(255,255,255,.6);
+}
+.podium .p1 .place { background: linear-gradient(100deg, #f5b400 0%, #ffe680 35%, #ffd23f 55%, #e9a800 100%); }
+.podium .p2 .place { background: linear-gradient(100deg, #aebccd 0%, #f6f8fb 35%, #d5dde8 55%, #a8b6c8 100%); }
+.podium .p3 .place { background: linear-gradient(100deg, #cf7a3c 0%, #ffcc9c 35%, #eba06a 55%, #c67036 100%); }
+.podium .step canvas { filter: drop-shadow(0 6px 5px rgba(30,40,80,.22)); }
+
+/* リザルト・順位表: 行の立体と 1〜3 位のバッジ */
+.results .row, .standings-list .row {
+  background: linear-gradient(#fbf8fd, #efe8f5);
+  box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(61,44,62,.08);
+}
+.results .row.you, .standings-list .row.you { background: linear-gradient(#fff6cc, #ffe9a0); }
+.results .row .pos, .standings-list .row .pos {
+  display: grid; place-items: center;
+  border-radius: 50%;
+  aspect-ratio: 1;
+  line-height: 1;
+}
+.results .row:nth-child(-n+3) .pos, .standings-list .row:nth-child(-n+3) .pos { color: var(--ink); box-shadow: inset 0 2px 0 rgba(255,255,255,.7), 0 1px 0 rgba(61,44,62,.25); }
+.results .row:nth-child(1) .pos, .standings-list .row:nth-child(1) .pos { background: radial-gradient(circle at 35% 30%, #fff4b0, #f5b400); }
+.results .row:nth-child(2) .pos, .standings-list .row:nth-child(2) .pos { background: radial-gradient(circle at 35% 30%, #fff, #b9c6d6); }
+.results .row:nth-child(3) .pos, .standings-list .row:nth-child(3) .pos { background: radial-gradient(circle at 35% 30%, #ffe0c4, #d98448); }
+.standings-list .row .pos { width: 32px; }
+.standings-list.small .row .pos { width: 24px; }
+.earned canvas { filter: drop-shadow(0 4px 4px rgba(30,40,80,.22)); }
+
+/* 設定パネル */
+#settings { background: radial-gradient(ellipse at 50% 30%, rgba(40,30,60,.45), rgba(20,15,35,.7)); }
+#settings .panel { box-shadow: 0 0 0 5px #fff, 0 20px 40px rgba(10,10,30,.35); background: linear-gradient(#fff, #faf7fd); }
+.toggle, .speed button, .rivals button, #settings .row button {
+  background-image: linear-gradient(#f8f4fb, #ece5f2);
+  box-shadow: inset 0 1px 0 #fff, 0 3px 0 rgba(61,44,62,.12);
+}
+.speed button[aria-pressed="true"], .rivals button[aria-pressed="true"] { background-image: var(--gloss); }
+.toggle b { box-shadow: inset 0 2px 4px rgba(0,0,0,.18); }
+.toggle b::after { box-shadow: 0 2px 4px rgba(0,0,0,.25); }
+#settings .close { background-image: var(--gloss); box-shadow: 0 4px 0 #2a7fd6; }
+
+/* 画面遷移: なめらかなフェード＋浮き上がり */
+.screen.enter { animation: enter-v4 .42s cubic-bezier(.2, 1.2, .4, 1); }
+@keyframes enter-v4 { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* 横向き: ゴール画面を 1 画面に収める（左: メダル・くるま・ボタン / 右: 表彰台・リザルト） */
+@media (orientation: landscape) and (max-height: 500px) {
+  .goal-card { grid-template-rows: repeat(5, auto); max-height: calc(100% - 16px); padding: 8px 12px; gap: 4px 14px; }
+  .goal-hero { grid-column: 1; grid-row: 1 / 4; flex-direction: row; align-items: center; }
+  .goal-card > *:not(.goal-hero):not(.goal-buttons) { grid-column: 2; }
+  .goal-buttons { grid-column: 1; grid-row: 4 / 6; gap: 16px; }
+  .goal-card .big-btn { width: 76px; height: 76px; }
+  .medal { width: 78px; }
+  .goal-car { width: 104px; height: 104px; }
+  .podium .step canvas { width: 40px; height: 40px; }
+  .podium .step .place { height: 24px; font-size: 15px; padding-top: 3px; }
+  .podium .p1 .place { height: 32px; }
+  .podium .p3 .place { height: 18px; }
+  .your-place canvas { width: 34px; height: 34px; }
+  .your-place b { font-size: 17px; }
+  .results .row { padding: 1px 6px; }
+  .results .row canvas { width: 22px; height: 22px; }
+  .earned { min-height: 36px; gap: 6px; }
+  .earned canvas { width: 36px; height: 36px; }
+  .race-record { font-size: 12px; }
+  .menu::before { height: 40%; }
+  #scr-title .big-btn { width: 96px; height: 96px; }
+  #scr-title .round-btn { width: 68px; height: 68px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo .l3::after { animation: none; }
+}

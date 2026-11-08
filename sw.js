@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the game works offline.
 // HTML/JS/CSS use network-first (fresh when online), icons cache-first.
-const VERSION = 'buubuu-v6-night';
+const VERSION = 'buubuu-v7-visual';
 const SHELL = [
   './',
   './index.html',
@@ -22,6 +22,9 @@ const SHELL = [
   './js/minimap.js',
   './js/vehicle-stats.js',
   './js/ghost.js',
+  './js/render-sky.js',
+  './js/render-road.js',
+  './js/render-fx.js',
   './js/render.js',
   './js/render-hud.js',
   './js/rng.js',

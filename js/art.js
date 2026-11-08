@@ -131,6 +131,177 @@ function star(c, x, y, r, inner = 0.5, points = 5, rot = -Math.PI / 2) {
 }
 
 // ---------- vehicles ----------
+// ---------- vehicle shading (light from the upper left) ----------
+const SHADE = 'rgba(46,24,60,';
+/** Rounded body panel: soft top-light, darker underside, rounded sides and a glossy band. Re-strokes the outline. */
+function shadeBody(c, x, y, w, h, r, o = {}) {
+  const { lw = 3, gloss = 0.32, bottom = 0.3 } = o;
+  c.save();
+  rrect(c, x, y, w, h, r);
+  c.clip();
+  let g = c.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, 'rgba(255,255,255,0.22)');
+  g.addColorStop(0.32, 'rgba(255,255,255,0)');
+  g.addColorStop(0.62, SHADE + '0)');
+  g.addColorStop(1, SHADE + bottom + ')');
+  c.fillStyle = g;
+  c.fillRect(x, y, w, h);
+  g = c.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, SHADE + '0.10)');
+  g.addColorStop(0.16, SHADE + '0)');
+  g.addColorStop(0.8, SHADE + '0)');
+  g.addColorStop(1, SHADE + '0.24)');
+  c.fillStyle = g;
+  c.fillRect(x, y, w, h);
+  if (gloss > 0) {
+    c.globalAlpha = gloss;
+    rrect(c, x + w * 0.1, y + h * 0.09, w * 0.62, Math.max(2.5, h * 0.11), Math.max(1.2, h * 0.055));
+    c.fillStyle = '#fff';
+    c.fill();
+  }
+  c.restore();
+  rrect(c, x, y, w, h, r);
+  c.lineWidth = lw;
+  c.strokeStyle = OUT;
+  c.stroke();
+}
+/** Window glass: sky reflection on top, darker bottom, two diagonal light streaks. */
+function glass(c, x, y, w, h, r) {
+  c.save();
+  rrect(c, x, y, w, h, r);
+  c.clip();
+  const g = c.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, 'rgba(255,255,255,0.38)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.02)');
+  g.addColorStop(1, 'rgba(24,60,120,0.26)');
+  c.fillStyle = g;
+  c.fillRect(x, y, w, h);
+  c.fillStyle = 'rgba(255,255,255,0.42)';
+  c.beginPath();
+  c.moveTo(x + w * 0.58, y);
+  c.lineTo(x + w * 0.74, y);
+  c.lineTo(x + w * 0.5, y + h);
+  c.lineTo(x + w * 0.34, y + h);
+  c.closePath();
+  c.fill();
+  c.fillStyle = 'rgba(255,255,255,0.24)';
+  c.beginPath();
+  c.moveTo(x + w * 0.8, y);
+  c.lineTo(x + w * 0.86, y);
+  c.lineTo(x + w * 0.62, y + h);
+  c.lineTo(x + w * 0.56, y + h);
+  c.closePath();
+  c.fill();
+  c.restore();
+  rrect(c, x, y, w, h, r);
+  c.lineWidth = 2.5;
+  c.strokeStyle = OUT;
+  c.stroke();
+}
+/** Tyre with tread chevrons and a rubbery side highlight. */
+function tyre(c, x, y, w, h, r) {
+  rrect(c, x, y, w, h, r);
+  fs(c, '#3a3440');
+  c.save();
+  rrect(c, x, y, w, h, r);
+  c.clip();
+  const g = c.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0.04)');
+  g.addColorStop(0.28, 'rgba(255,255,255,0.16)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.3)');
+  c.fillStyle = g;
+  c.fillRect(x, y, w, h);
+  c.strokeStyle = 'rgba(15,8,20,0.42)';
+  c.lineWidth = 1.6;
+  for (let ty = y + 4; ty < y + h - 2; ty += 5) {
+    c.beginPath();
+    c.moveTo(x + 3, ty);
+    c.lineTo(x + w / 2, ty + 2.2);
+    c.lineTo(x + w - 3, ty);
+    c.stroke();
+  }
+  c.restore();
+  rrect(c, x, y, w, h, r);
+  c.lineWidth = 3;
+  c.strokeStyle = OUT;
+  c.stroke();
+}
+/** Chrome bumper / trim: metallic bands. */
+function chrome(c, x, y, w, h, r, lw = 2.5) {
+  rrect(c, x, y, w, h, r);
+  const g = c.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.42, '#e3e6f0');
+  g.addColorStop(0.55, '#a9afc2');
+  g.addColorStop(1, '#d9dce8');
+  fs(c, g, lw);
+}
+/** Lamp lens with an inner glow and a soft halo (tail lights). */
+function lamp(c, x, y, w, h, r, color = '#ff4747', lw = 2.5) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const halo = c.createRadialGradient(cx, cy, 1, cx, cy, w * 0.95);
+  halo.addColorStop(0, 'rgba(255,90,80,0.38)');
+  halo.addColorStop(1, 'rgba(255,90,80,0)');
+  c.fillStyle = halo;
+  c.fillRect(cx - w, cy - w, w * 2, w * 2);
+  rrect(c, x, y, w, h, r);
+  const g = c.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, '#ff9a8a');
+  g.addColorStop(0.45, color);
+  g.addColorStop(1, '#c41f2c');
+  fs(c, g, lw);
+  c.save();
+  rrect(c, x, y, w, h, r);
+  c.clip();
+  c.strokeStyle = 'rgba(120,0,10,0.28)';
+  c.lineWidth = 1;
+  for (let lx = x + 3; lx < x + w; lx += 3.5) {
+    c.beginPath();
+    c.moveTo(lx, y);
+    c.lineTo(lx, y + h);
+    c.stroke();
+  }
+  c.restore();
+  ell(c, x + w * 0.32, y + h * 0.32, w * 0.16, h * 0.18);
+  c.fillStyle = 'rgba(255,255,255,0.9)';
+  c.fill();
+}
+/** Twin exhaust tips under the rear bumper. */
+function exhausts(c, y, xs = [30, 70]) {
+  for (const x of xs) {
+    ell(c, x, y, 5.2, 3.6);
+    const g = c.createLinearGradient(x - 5, 0, x + 5, 0);
+    g.addColorStop(0, '#8a90a2');
+    g.addColorStop(0.4, '#f2f4fa');
+    g.addColorStop(1, '#7c8294');
+    fs(c, g, 2);
+    ell(c, x, y + 0.4, 2.8, 1.8);
+    c.fillStyle = '#2a2230';
+    c.fill();
+  }
+}
+/** Shade a round head / ball (fur) – lit from the upper left. */
+function shadeBall(c, x, y, r, lw = 3) {
+  c.save();
+  c.beginPath();
+  c.arc(x, y, r, 0, TAU);
+  c.clip();
+  const g = c.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.08);
+  g.addColorStop(0, 'rgba(255,255,255,0.28)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0)');
+  g.addColorStop(1, SHADE + '0.22)');
+  c.fillStyle = g;
+  c.fillRect(x - r, y - r, r * 2, r * 2);
+  c.restore();
+  c.beginPath();
+  c.arc(x, y, r, 0, TAU);
+  c.lineWidth = lw;
+  c.strokeStyle = OUT;
+  c.stroke();
+}
+
 export const VEHICLES = [
   { id: 'car', label: 'あかいくるま', color: '#ff5252' },
   { id: 'fire', label: 'しょうぼうしゃ', color: '#f03a32' },
@@ -141,10 +312,8 @@ export const VEHICLES = [
 ];
 
 function wheelsFront(c, y = 72) {
-  rrect(c, 11, y, 21, 24, 7);
-  fs(c, '#3a3440');
-  rrect(c, 68, y, 21, 24, 7);
-  fs(c, '#3a3440');
+  tyre(c, 11, y, 21, 24, 7);
+  tyre(c, 68, y, 21, 24, 7);
 }
 function faceFront(c, ey = 62, er = 11.5, mouthY = 73, dark = false, t = 0) {
   eye(c, 27, ey, er, { lx: Math.sin(t) * 0.6 });
@@ -154,8 +323,13 @@ function faceFront(c, ey = 62, er = 11.5, mouthY = 73, dark = false, t = 0) {
   smile(c, 50, mouthY, 20, true, dark ? 2.5 : 2.5);
 }
 function bumperFront(c, y = 82) {
-  rrect(c, 7, y, 86, 9, 4.5);
-  fs(c, '#e4e4ee', 2.5);
+  chrome(c, 7, y, 86, 9, 4.5);
+  // little fog lamps
+  for (const x of [17, 83]) {
+    circ(c, x, y + 4.5, 2.4);
+    c.fillStyle = '#fff6c8';
+    c.fill();
+  }
 }
 
 /** Front view with a big smiling face. Box 100x100. */
@@ -166,6 +340,7 @@ export function drawVehicleFront(c, id, t = 0) {
       wheelsFront(c);
       rrect(c, 12, 10, 76, 46, 12);
       fs(c, '#f03a32');
+      shadeBody(c, 12, 10, 76, 46, 12, { gloss: 0 });
       // ladder on the roof
       rrect(c, 28, 2, 44, 9, 3);
       fs(c, '#d5dbe6', 2.5);
@@ -177,9 +352,10 @@ export function drawVehicleFront(c, id, t = 0) {
       fs(c, '#ff2d55', 2.5);
       rrect(c, 20, 17, 60, 26, 8);
       fs(c, '#bfe9ff');
-      line(c, [28, 37, 38, 22], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 20, 17, 60, 26, 8);
       rrect(c, 4, 46, 92, 40, 14);
       fs(c, '#f03a32');
+      shadeBody(c, 4, 46, 92, 40, 14);
       rrect(c, 6, 75, 88, 4, 2);
       c.fillStyle = '#fff3a8';
       c.fill();
@@ -195,6 +371,7 @@ export function drawVehicleFront(c, id, t = 0) {
       line(c, [92, 30, 99, 22, 99, 40], 3);
       rrect(c, 6, 8, 88, 80, 14);
       fs(c, '#ffc531');
+      shadeBody(c, 6, 8, 88, 80, 14, { gloss: 0.22 });
       rrect(c, 20, 13, 60, 10, 4);
       fs(c, '#4a4458', 2.5);
       for (let x = 26; x < 76; x += 8) {
@@ -204,7 +381,7 @@ export function drawVehicleFront(c, id, t = 0) {
       }
       rrect(c, 13, 27, 74, 25, 8);
       fs(c, '#bfe9ff');
-      line(c, [22, 46, 32, 31], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 13, 27, 74, 25, 8);
       line(c, [50, 27, 50, 52], 2.5);
       rrect(c, 6, 55, 88, 4, 2);
       c.fillStyle = '#fff';
@@ -220,9 +397,10 @@ export function drawVehicleFront(c, id, t = 0) {
       shine(c, 38, 8, 10, 3);
       rrect(c, 18, 14, 64, 40, 16);
       fs(c, '#ffffff');
+      shadeBody(c, 18, 14, 64, 40, 16, { gloss: 0 });
       rrect(c, 25, 20, 50, 24, 9);
       fs(c, '#bfe9ff');
-      line(c, [32, 40, 42, 24], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 25, 20, 50, 24, 9);
       c.save();
       rrect(c, 4, 46, 92, 40, 16);
       c.clip();
@@ -231,8 +409,7 @@ export function drawVehicleFront(c, id, t = 0) {
       c.fillStyle = '#2f3447';
       c.fillRect(0, 70, 100, 30);
       c.restore();
-      rrect(c, 4, 46, 92, 40, 16);
-      fs(c, null);
+      shadeBody(c, 4, 46, 92, 40, 16, { gloss: 0.2 });
       star(c, 50, 54, 5, 0.5);
       fs(c, '#ffcc33', 1.5);
       eye(c, 27, 60, 11, { lx: Math.sin(t) * 0.6 });
@@ -251,9 +428,10 @@ export function drawVehicleFront(c, id, t = 0) {
       fs(c, '#ff2d55', 2.5);
       rrect(c, 6, 9, 88, 79, 14);
       fs(c, '#fbfbff');
+      shadeBody(c, 6, 9, 88, 79, 14, { gloss: 0.15 });
       rrect(c, 15, 22, 70, 26, 8);
       fs(c, '#bfe9ff');
-      line(c, [24, 42, 34, 26], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 15, 22, 70, 26, 8);
       rrect(c, 6, 51, 88, 6, 2);
       c.fillStyle = '#ff4b5c';
       c.fill();
@@ -281,6 +459,7 @@ export function drawVehicleFront(c, id, t = 0) {
       }
       rrect(c, 16, 12, 68, 44, 22);
       fs(c, '#59c95a');
+      shadeBody(c, 16, 12, 68, 44, 22, { gloss: 0 });
       // horns
       for (const x of [24, 76]) {
         c.beginPath();
@@ -291,9 +470,10 @@ export function drawVehicleFront(c, id, t = 0) {
       }
       rrect(c, 25, 21, 50, 22, 10);
       fs(c, '#d6f5c9');
-      line(c, [32, 37, 40, 25], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 25, 21, 50, 22, 10);
       rrect(c, 4, 46, 92, 40, 16);
       fs(c, '#59c95a');
+      shadeBody(c, 4, 46, 92, 40, 16);
       for (const [x, y, r] of [[12, 54, 3], [88, 52, 3.5], [20, 82, 2.5], [82, 80, 2.5]]) {
         circ(c, x, y, r);
         c.fillStyle = '#3fa64a';
@@ -319,11 +499,13 @@ export function drawVehicleFront(c, id, t = 0) {
       wheelsFront(c);
       rrect(c, 18, 14, 64, 42, 17);
       fs(c, '#ff5252');
+      shadeBody(c, 18, 14, 64, 42, 17, { gloss: 0 });
       rrect(c, 25, 20, 50, 24, 9);
       fs(c, '#bfe9ff');
-      line(c, [32, 40, 42, 24], 3, 'rgba(255,255,255,0.9)');
+      glass(c, 25, 20, 50, 24, 9);
       rrect(c, 4, 46, 92, 40, 16);
       fs(c, '#ff5252');
+      shadeBody(c, 4, 46, 92, 40, 16);
       shine(c, 14, 49, 30, 5);
       faceFront(c, 62, 11.5, 72, false, t);
       bumperFront(c);
@@ -342,19 +524,11 @@ function heart(c, x, y, s, color) {
 }
 
 function wheelsRear(c) {
-  rrect(c, 4, 64, 24, 30, 8);
-  fs(c, '#3a3440');
-  rrect(c, 72, 64, 24, 30, 8);
-  fs(c, '#3a3440');
+  tyre(c, 4, 64, 24, 30, 8);
+  tyre(c, 72, 64, 24, 30, 8);
 }
 function tailLights(c, y = 52) {
-  for (const x of [11, 73]) {
-    rrect(c, x, y, 16, 10, 5);
-    fs(c, '#ff4747', 2.5);
-    circ(c, x + 5, y + 3.5, 2);
-    c.fillStyle = '#fff';
-    c.fill();
-  }
+  for (const x of [11, 73]) lamp(c, x, y, 16, 10, 5);
 }
 function plate(c, y = 64) {
   rrect(c, 38, y, 24, 12, 3);
@@ -385,6 +559,7 @@ export function drawVehicleRear(c, id, f = 0) {
       }
       rrect(c, 7, 6, 86, 78, 13);
       fs(c, col);
+      shadeBody(c, 7, 6, 86, 78, 13, { gloss: 0.2 });
       if (id === 'bus') {
         rrect(c, 16, 13, 68, 24, 7);
         fs(c, '#a8dcf5');
@@ -393,15 +568,16 @@ export function drawVehicleRear(c, id, f = 0) {
         c.clip();
         driver(c, 50, 22);
         c.restore();
-        rrect(c, 16, 13, 68, 24, 7);
-        fs(c, null);
+        glass(c, 16, 13, 68, 24, 7);
         for (let y = 42; y < 52; y += 4) line(c, [28, y, 72, y], 2.5, '#b3862a');
         rrect(c, 7, 39, 86, 3, 1);
       } else {
         rrect(c, 15, 13, 31, 22, 6);
         fs(c, '#a8dcf5');
+        glass(c, 15, 13, 31, 22, 6);
         rrect(c, 54, 13, 31, 22, 6);
         fs(c, '#a8dcf5');
+        glass(c, 54, 13, 31, 22, 6);
         line(c, [50, 8, 50, 82], 2.5);
         rrect(c, 7, 40, 86, 6, 2);
         c.fillStyle = '#ff4b5c';
@@ -411,8 +587,8 @@ export function drawVehicleRear(c, id, f = 0) {
       }
       tailLights(c, 58);
       plate(c, 68);
-      rrect(c, 9, 80, 82, 8, 4);
-      fs(c, '#e4e4ee', 2.5);
+      chrome(c, 9, 80, 82, 8, 4);
+      exhausts(c, 89, [26]);
       break;
     }
     default: {
@@ -433,9 +609,11 @@ export function drawVehicleRear(c, id, f = 0) {
       if (id === 'fire') {
         rrect(c, 12, 4, 76, 46, 10);
         fs(c, col);
+        shadeBody(c, 12, 4, 76, 46, 10, { gloss: 0 });
       } else {
         rrect(c, 18, 12, 64, 40, 16);
         fs(c, col);
+        shadeBody(c, 18, 12, 64, 40, 16, { gloss: 0 });
       }
       if (id === 'dino') {
         for (const [x, y, s] of [[34, 12, 7], [50, 7, 9], [66, 12, 7]]) {
@@ -447,6 +625,7 @@ export function drawVehicleRear(c, id, f = 0) {
         }
         rrect(c, 18, 12, 64, 40, 16);
         fs(c, col);
+        shadeBody(c, 18, 12, 64, 40, 16, { gloss: 0 });
       }
       const wy = id === 'fire' ? 12 : 18;
       rrect(c, 25, wy, 50, 22, 8);
@@ -456,8 +635,7 @@ export function drawVehicleRear(c, id, f = 0) {
       c.clip();
       driver(c, 50, wy + 10);
       c.restore();
-      rrect(c, 25, wy, 50, 22, 8);
-      fs(c, null);
+      glass(c, 25, wy, 50, 22, 8);
       if (id === 'fire') {
         // ladder going back over the roof
         rrect(c, 30, -2, 40, 12, 3);
@@ -482,9 +660,8 @@ export function drawVehicleRear(c, id, f = 0) {
         c.fillStyle = '#2f3447';
         c.fillRect(0, 64, 100, 30);
         c.restore();
-        rrect(c, 6, 42, 88, 40, 15);
-        fs(c, null);
       }
+      shadeBody(c, 6, 42, 88, 40, 15, { gloss: 0 });
       if (id === 'fire') {
         rrect(c, 6, 72, 88, 4, 2);
         c.fillStyle = '#fff3a8';
@@ -500,8 +677,18 @@ export function drawVehicleRear(c, id, f = 0) {
       shine(c, 14, 45, 26, 5);
       tailLights(c, 50);
       plate(c, 62);
-      rrect(c, 8, 77, 84, 9, 4.5);
-      fs(c, '#e4e4ee', 2.5);
+      if (id === 'car') {
+        // sporty rear wing
+        line(c, [30, 46, 30, 40], 3);
+        line(c, [70, 46, 70, 40], 3);
+        rrect(c, 14, 34, 72, 7, 3);
+        fs(c, '#2f2a36', 2.5);
+        rrect(c, 18, 35.2, 64, 1.8, 0.9);
+        c.fillStyle = 'rgba(255,255,255,0.35)';
+        c.fill();
+      }
+      chrome(c, 8, 77, 84, 9, 4.5);
+      exhausts(c, 88, id === 'dino' ? [] : [33, 67]);
     }
   }
 }
@@ -539,6 +726,7 @@ export function drawAnimalKart(c, animal, frame = 0) {
   // rear wing (behind everything)
   rrect(c, 10, 56, 80, 9, 3);
   fs(c, a.helmet, 2.5);
+  shadeBody(c, 10, 56, 80, 9, 3, { lw: 2.5, gloss: 0.4 });
   line(c, [24, 65, 24, 70], 3);
   line(c, [76, 65, 76, 70], 3);
   // arms
@@ -587,6 +775,7 @@ export function drawAnimalKart(c, animal, frame = 0) {
   }
   circ(c, hx, hy, 24);
   fs(c, a.fur);
+  shadeBall(c, hx, hy, 24);
   if (animal === 'cat') {
     line(c, [hx - 4, hy - 23, hx - 4, hy - 15], 2.5, '#e08a2e');
     line(c, [hx + 4, hy - 23, hx + 4, hy - 15], 2.5, '#e08a2e');
@@ -664,10 +853,8 @@ export function drawAnimalKart(c, animal, frame = 0) {
     smile(c, hx, hy + 6, animal === 'frog' ? 20 : 12, cheer || animal === 'frog', 2);
   }
   // kart: bigger slick tyres, body, tail lights, racing number
-  rrect(c, 0, 68, 25, 34, 9);
-  fs(c, '#3a3440');
-  rrect(c, 75, 68, 25, 34, 9);
-  fs(c, '#3a3440');
+  tyre(c, 0, 68, 25, 34, 9);
+  tyre(c, 75, 68, 25, 34, 9);
   for (const x of [12.5, 87.5]) {
     rrect(c, x - 7, 74, 14, 5, 2.5);
     c.fillStyle = '#5a5464';
@@ -675,15 +862,13 @@ export function drawAnimalKart(c, animal, frame = 0) {
   }
   rrect(c, 14, 62, 72, 32, 13);
   fs(c, a.kart);
-  shine(c, 22, 66, 22, 4);
-  rrect(c, 19, 76, 12, 7, 3.5);
-  fs(c, '#ff4747', 2);
-  rrect(c, 69, 76, 12, 7, 3.5);
-  fs(c, '#ff4747', 2);
+  shadeBody(c, 14, 62, 72, 32, 13, { gloss: 0.36 });
+  lamp(c, 19, 76, 12, 7, 3.5, '#ff4747', 2);
+  lamp(c, 69, 76, 12, 7, 3.5, '#ff4747', 2);
   roundel(c, 50, 79, 8.5, a.number);
   // bumper
-  rrect(c, 18, 90, 64, 7, 3.5);
-  fs(c, '#e4e4ee', 2.2);
+  chrome(c, 18, 90, 64, 7, 3.5, 2.2);
+  exhausts(c, 99, [36, 64]);
 }
 
 // ---------- items ----------
@@ -822,6 +1007,20 @@ const SCENERY = {
         c.fillStyle = '#5cc75c';
         c.fill();
       }
+      // shade under the canopy and a mid-tone layer for depth
+      for (const [x, y, r] of [[60, 80, 18], [80, 74, 14], [44, 84, 14]]) {
+        circ(c, x, y, r);
+        c.fillStyle = '#46ad52';
+        c.fill();
+      }
+      for (const [x, y, r] of [[38, 38, 16], [26, 62, 12], [58, 30, 12]]) {
+        circ(c, x, y, r);
+        c.fillStyle = '#6fd165';
+        c.fill();
+      }
+      rrect(c, 44, 92, 6, 30, 3);
+      c.fillStyle = '#c9864f';
+      c.fill();
       for (const [x, y, r] of [[40, 32, 9], [24, 60, 6], [62, 52, 7]]) {
         circ(c, x, y, r);
         c.fillStyle = '#86dd73';
@@ -846,6 +1045,14 @@ const SCENERY = {
         c.lineTo(50, y - 52);
         c.closePath();
         fs(c, '#2f9e6a');
+        // shaded right half of each tier
+        c.beginPath();
+        c.moveTo(50, y - 50);
+        c.lineTo(50 + w - 3, y - 1);
+        c.quadraticCurveTo(50 + w * 0.5, y + 5, 50, y + 6);
+        c.closePath();
+        c.fillStyle = '#258a5b';
+        c.fill();
         c.beginPath();
         c.moveTo(50 - w * 0.45, y - 30);
         c.quadraticCurveTo(40, y - 22, 46, y - 26);
@@ -910,6 +1117,13 @@ const SCENERY = {
       fs(c, '#4cbb5c');
       c.fillStyle = '#4cbb5c';
       c.fillRect(8, 30, 84, 10);
+      c.fillStyle = '#3fa64e';
+      c.fillRect(8, 46, 84, 8);
+      for (const [x, y, r] of [[18, 32, 8], [44, 18, 10], [72, 32, 7]]) {
+        circ(c, x, y, r);
+        c.fillStyle = '#6fd165';
+        c.fill();
+      }
       for (const [x, y, col] of [[28, 30, '#ff8fd1'], [52, 18, '#fff'], [70, 34, '#ffd23f'], [40, 44, '#ff4d6d']]) {
         star(c, x, y, 5, 0.5);
         c.fillStyle = col;
@@ -992,12 +1206,42 @@ const SCENERY = {
       fs(c, '#c45a4a');
       rrect(c, 18, 50, 84, 56, 6);
       fs(c, '#fff3d6');
+      // shaded right wall and the shadow under the eaves
+      c.fillStyle = '#efdcb8';
+      c.fillRect(72, 52, 28, 52);
+      c.fillStyle = 'rgba(120,70,60,0.22)';
+      c.fillRect(20, 52, 80, 8);
       c.beginPath();
       c.moveTo(6, 56);
       c.lineTo(60, 12);
       c.lineTo(114, 56);
       c.closePath();
       fs(c, '#ff6b5a');
+      c.beginPath();
+      c.moveTo(60, 16);
+      c.lineTo(110, 54);
+      c.lineTo(60, 54);
+      c.closePath();
+      c.fillStyle = '#e8574a';
+      c.fill();
+      // roof tiles
+      c.strokeStyle = 'rgba(160,40,40,0.35)';
+      c.lineWidth = 1.5;
+      for (const y of [28, 40, 50]) {
+        const half = ((y - 12) / 44) * 54;
+        c.beginPath();
+        c.moveTo(60 - half + 4, y);
+        c.lineTo(60 + half - 4, y);
+        c.stroke();
+      }
+      c.beginPath();
+      c.moveTo(6, 56);
+      c.lineTo(60, 12);
+      c.lineTo(114, 56);
+      c.closePath();
+      c.strokeStyle = OUT;
+      c.lineWidth = 3;
+      c.stroke();
       rrect(c, 50, 70, 20, 36, 8);
       fs(c, '#a8693a');
       circ(c, 65, 88, 2);
@@ -1648,6 +1892,42 @@ Object.assign(SCENERY, TRACK_SPRITES, MEDAL_SPRITES);
 
 export const SPRITES = SCENERY;
 
+// Scenery that gets the shared key light (top-left sun) and a little ground occlusion.
+// Vehicles, karts, animals, items and medals keep their flat cartoon look.
+const LIT = new Set([
+  'tree', 'pine', 'tulips', 'sunflower', 'bush', 'flowers', 'house', 'palm', 'umbrella', 'sandcastle',
+  'shellpile', 'lighthouse', 'boat', 'buoy', 'snowmanSmall', 'snowmanBig', 'igloo', 'snowbush', 'hay',
+  'startgate', 'goalgate', 'grandstand', 'cone', 'tirewall', 'signL', 'signR', 'lamp', 'roadblock',
+  'building', 'building2', 'building3', 'building4',
+]);
+
+/** Shading pass on an already drawn sprite: only touches the sprite's own pixels. */
+function lightPass(c, bw, bh) {
+  c.save();
+  c.globalCompositeOperation = 'source-atop';
+  // Key light from the upper left, soft falloff to the lower right.
+  let g = c.createLinearGradient(0, 0, bw, bh);
+  g.addColorStop(0, 'rgba(255,250,225,0.26)');
+  g.addColorStop(0.42, 'rgba(255,255,255,0)');
+  g.addColorStop(0.62, 'rgba(40,30,80,0)');
+  g.addColorStop(1, 'rgba(40,30,80,0.22)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, bw, bh);
+  // Ambient occlusion near the ground.
+  g = c.createLinearGradient(0, bh * 0.72, 0, bh);
+  g.addColorStop(0, 'rgba(30,40,50,0)');
+  g.addColorStop(1, 'rgba(30,40,50,0.2)');
+  c.fillStyle = g;
+  c.fillRect(0, bh * 0.72, bw, bh * 0.28);
+  // Thin rim light on the sunny side.
+  g = c.createLinearGradient(0, 0, bw * 0.35, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0.12)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, bw * 0.35, bh * 0.8);
+  c.restore();
+}
+
 const cache = new Map();
 /**
  * Pre-render a sprite to an offscreen canvas. `px` is the larger side in device pixels.
@@ -1667,6 +1947,13 @@ export function spriteImage(id, px = 256, frame = 0) {
   c.translate(2, 2);
   c.scale(k, k);
   def.draw(c, frame);
+  if (LIT.has(id)) {
+    try {
+      lightPass(c, bw, bh);
+    } catch (e) {
+      /* shading is optional */
+    }
+  }
   cache.set(key, cv);
   return cv;
 }
