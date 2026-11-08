@@ -1,5 +1,6 @@
 // Race session: rules and state (no drawing, no DOM).
 import { generateCourse } from './course.js';
+import { generateCircuit } from './circuit.js';
 import { makeRng } from './rng.js';
 import {
   SEGMENT_LENGTH, SPEED_PRESETS, makePlayer, stepPlayer, overlap, bounce, startBoost, progress, PLAYER_W, AIR_TIME,
@@ -24,6 +25,30 @@ export const PHOTO_SCALE = 0.35;
 export const PHOTO_SECS = 1.4;
 /** Seconds a new leader must hold the lead before it is announced. */
 export const LEADER_SETTLE = 0.8;
+/** Circuit replay: one frame every REPLAY_DT race seconds, at most REPLAY_MAX_SECS. */
+export const REPLAY_DT = 1 / 30;
+export const REPLAY_MAX_SECS = 240;
+/** Keep recording the replay this long after the player crosses the line. */
+export const REPLAY_TAIL = 3;
+/** Gear change points (speed ratio) for the cosmetic 6-speed gearbox. */
+export const GEAR_EDGES = [0, 0.16, 0.32, 0.48, 0.64, 0.8];
+export const GEAR_TOP = 1.08;
+
+/** Cosmetic gearbox: speed ratio -> { gear 1..6, rpm 0..1 within the gear }. */
+export function gearFor(pct) {
+  const v = Math.max(0, Number.isFinite(pct) ? pct : 0);
+  let g = 1;
+  for (let i = GEAR_EDGES.length - 1; i >= 0; i--) {
+    if (v >= GEAR_EDGES[i]) {
+      g = i + 1;
+      break;
+    }
+  }
+  const lo = GEAR_EDGES[g - 1];
+  const hi = g < GEAR_EDGES.length ? GEAR_EDGES[g] : GEAR_TOP;
+  const rpm = Math.max(0, Math.min(1, 0.25 + 0.75 * ((v - lo) / (hi - lo))));
+  return { gear: g, rpm };
+}
 
 /** Keep only well-formed [t, x, z] samples in time order; null when nothing usable. */
 export function cleanTrace(trace) {
@@ -69,14 +94,25 @@ export class Race {
     this.playerPreset = vehiclePreset(this.preset, o.vehicle); // the chosen vehicle's own feel
     this.level = AI_LEVELS[o.rivals] || AI_LEVELS.normal;
     this.levelId = AI_LEVELS[o.rivals] ? o.rivals : 'normal';
-    this.course = generateCourse(o.course, { length: o.length || 1000, seed: o.seed });
+    this.circuitId = o.circuit || null;
+    if (this.circuitId) {
+      this.courseId = this.circuitId;
+      this.course = generateCircuit(this.circuitId, { laps: o.laps || 3, seed: o.seed });
+    } else {
+      this.course = generateCourse(o.course, { length: o.length || 1000, seed: o.seed });
+    }
     this.hooks = o.hooks || {};
     this.rng = makeRng((o.seed ?? 7) * 31 + 11);
     this.player = makePlayer();
     const grid = playerGridPos();
     this.player.z = grid.z;
     this.player.x = grid.x;
-    this.rivals = this.course.rivals.map((r) => makeRival(r.animal, r, this.level, this.rng));
+    this.rivals = this.course.rivals.map((r, i) => {
+      const id = r.animal || r.id || `car${i + 1}`;
+      const rv = makeRival(id, r, this.level, this.rng);
+      if (r.car) rv.car = r.car;
+      return rv;
+    });
     this.events = this.course.events.map((e) => ({ ...e, t: 0 }));
     this.state = 'countdown';
     this.time = 0;
@@ -120,6 +156,62 @@ export class Race {
     this.leaderCand = null;
     this.leaderSince = 0;
     this.rampSeg = -1;
+    // Circuit: laps, cosmetic gearbox, auto-brake state, replay recording.
+    this.isCircuit = !!this.circuitId;
+    this.laps = this.isCircuit ? Math.max(1, this.course.laps || 1) : 1;
+    this.lapZ = this.isCircuit ? (this.course.lapZ || this.course.goalZ / this.laps) : this.course.goalZ;
+    this.lapsStartZ = this.course.goalZ - this.laps * this.lapZ; // where lap 1 begins
+    this.lap = 1;
+    this.lapTimes = [];
+    this.bestLap = 0;
+    this.lapStart = 0; // race clock at the start of the current lap
+    this.braking = false;
+    this.player.gear = 1;
+    this.player.rpm = 0;
+    this.replay = this.isCircuit ? { dt: REPLAY_DT, frames: [] } : null;
+    this.replayAt = -Infinity;
+    this.replayEnd = Infinity;
+  }
+
+  /** Total race distance in world units (for lap-aware displays). */
+  get lapProgress() {
+    if (!this.isCircuit) return this.progress;
+    const d = (this.player.z - this.lapsStartZ) - (this.lap - 1) * this.lapZ;
+    return Math.max(0, Math.min(1, d / this.lapZ));
+  }
+
+  /** Record one replay frame every REPLAY_DT race seconds (circuit only). */
+  recordReplay() {
+    if (!this.replay) return;
+    const t = this.raceClock;
+    if (t < 0 || t > REPLAY_MAX_SECS || t > this.replayEnd) return;
+    // Fill every missed slot so frames[i] is always the state at i * dt.
+    while (this.replay.frames.length * REPLAY_DT <= t + 1e-9) {
+      const r3 = (v) => Math.round(v * 1000) / 1000;
+      const p = this.player;
+      this.replay.frames.push({
+        p: [r3(p.x), Math.round(p.z * 10) / 10, r3(p.steer || 0)],
+        r: this.rivals.map((r) => [r3(r.x), Math.round(r.z * 10) / 10]),
+      });
+    }
+  }
+
+  /** Lap bookkeeping: emits lap(n, time, best) for the lap just completed, finalLap() once. */
+  checkLaps() {
+    const p = this.player;
+    while (this.lap <= this.laps && p.z >= this.lapsStartZ + this.lap * this.lapZ) {
+      const crossT = this.raceClock - Math.max(0, p.z - (this.lapsStartZ + this.lap * this.lapZ)) / Math.max(1, p.speed);
+      const time = Math.max(0, crossT - this.lapStart);
+      this.lapTimes.push(time);
+      const best = !this.bestLap || time < this.bestLap;
+      if (best) this.bestLap = time;
+      this.lapStart = crossT;
+      const n = this.lap;
+      this.lap++;
+      this.emit('lap', n, time, best);
+      if (this.lap === this.laps && this.laps > 1) this.emit('finalLap');
+    }
+    if (this.lap > this.laps) this.lap = this.laps;
   }
 
   /** Seconds since the green light (negative during the countdown). */
@@ -198,7 +290,7 @@ export class Race {
 
   /** Speed in "km/h" for the gauge (purely cosmetic). */
   get kmh() {
-    return Math.round(this.speedPct * 120);
+    return Math.round(this.speedPct * (this.isCircuit ? 240 : 120));
   }
 
   honk() {
@@ -253,7 +345,12 @@ export class Race {
       p.air = Math.max(0, p.air - dt);
       if (p.air === 0) this.emit('land', 'player');
     }
-    const fenced = stepPlayer(p, finished ? { steer: 0 } : input, dt, { preset: this.playerPreset, curve: seg.curve, finished });
+    const brakeCap = this.course.brake ? this.course.brake[this.segIndex(p.z)] : undefined;
+    const fenced = stepPlayer(p, finished ? { steer: 0 } : input, dt, { preset: this.playerPreset, curve: seg.curve, finished, cap: brakeCap });
+    this.braking = !!p.braking;
+    const gb = gearFor(this.speedPct);
+    p.gear = gb.gear;
+    p.rpm = gb.rpm;
     if (fenced && !finished && this.time - (this.fenceAt || -9) > 1.2) {
       this.fenceAt = this.time;
       this.emit('fence');
@@ -278,6 +375,7 @@ export class Race {
       time: this.time,
       rng: this.rng,
       racing: true,
+      brake: this.course.brake || null,
     };
     for (const r of this.rivals) {
       const wasFinished = r.finished;
@@ -348,6 +446,8 @@ export class Race {
 
     if (!finished) this.checkTrack(z0, p.z);
     this.updateEvents(dt);
+    this.recordReplay();
+    if (!finished && this.isCircuit) this.checkLaps();
     if (!finished) {
       this.recordTrace();
       this.checkGhost();
@@ -373,6 +473,7 @@ export class Race {
         this.finishTime = this.time;
         this.finishExact = this.time - Math.max(0, p.z - this.course.goalZ) / Math.max(1, p.speed);
         this.recordTrace(true);
+        this.replayEnd = this.raceClock + REPLAY_TAIL;
         // Final place comes from the finish order, so it always matches result().positions.
         this.finalRank = this.order.findIndex((e) => e.id === 'player') + 1 || rankOf(p.z, this.rivals);
         this.rank = this.finalRank;
@@ -540,6 +641,10 @@ export class Race {
       level: this.levelId,
       order,
       trace: this.trace.slice(),
+      lapTimes: this.lapTimes.slice(),
+      bestLap: this.bestLap,
+      laps: this.laps,
+      circuit: this.circuitId,
     };
   }
 }

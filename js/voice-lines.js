@@ -200,6 +200,34 @@ export function ghostIntroLine() {
   return 'まえの じぶんと しょうぶ！ すけている くるまが おばけ だよ';
 }
 
+// ---- circuit mode (laps, garage, replay)
+export const CAR_MODEL_NAMES = { gt: 'スポーツカー', proto: 'レーシングカー', hatch: 'ちいさな はやいくるま' };
+
+/** n: lap now started (1-based). */
+export function lapLine(n, laps = 3) {
+  const k = Math.max(1, Math.floor(Number(n) || 1));
+  const total = Math.max(1, Math.floor(Number(laps) || 3));
+  if (k >= total) return 'さいごの いっしゅう！ ファイナルラップ！';
+  return `${k}しゅうめ！`;
+}
+
+export function bestLapLine() {
+  return 'ベストラップ！ はやい！';
+}
+
+export function garageLine(model) {
+  const name = CAR_MODEL_NAMES[model] || 'くるま';
+  return `${name}！ いろも えらべるよ`;
+}
+
+export function circuitLine() {
+  return 'サーキットで 3しゅう しょうぶ！';
+}
+
+export function replayLine() {
+  return 'リプレイ！ かっこいいね';
+}
+
 export function createAnnouncer(say, now = () => Date.now()) {
   let pending = 0; // 候補の順位（0 = なし）
   let pendingAt = 0;

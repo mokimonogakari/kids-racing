@@ -243,10 +243,20 @@ export function stepRival(r, ctx, dt) {
   if (r.boost > 0) target = Math.max(target, max * 1.4);
   r.offroad = Math.abs(r.x) > 1.05;
   if (r.offroad) target *= 0.7;
+  // Circuit auto-brake: never faster than the recommended pace for the coming corner.
+  let braking = false;
+  if (ctx.brake && !r.finished) {
+    const cap = max * (ctx.brake[si] ?? 1) * Math.max(1, r.skill);
+    if (target > cap) {
+      target = cap;
+      braking = r.speed > cap;
+    }
+  }
   if (r.finished) target = max * 0.55;
+  r.braking = braking;
   const accel = preset.accel * 0.95 * (tr.start && r.driveT < ROCKET_SECS ? tr.start : 1);
   if (r.speed < target) r.speed = Math.min(target, r.speed + accel * dt);
-  else r.speed = Math.max(target, r.speed - accel * 1.3 * dt);
+  else r.speed = Math.max(target, r.speed - accel * (braking ? 1.8 : 1.3) * dt);
 
   // ---- lateral: smooth approach to the lane, with a small dead band (no twitching) ----
   const err = r.laneTarget - r.x;

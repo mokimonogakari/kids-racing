@@ -185,6 +185,30 @@ export class Engine {
     }
   }
 
+  /**
+   * Explicit gearbox for the circuit mode: gear 1..6 and rpm 0..1 drive the pitch instead
+   * of the speed-based three-gear model. Call after set() each frame (it overrides pitch).
+   */
+  engineGear(gear, rpm) {
+    const n = this.nodes;
+    const s = this.sound;
+    if (!n || !s || !s.ctx) return;
+    try {
+      const g = Math.max(1, Math.min(6, Math.round(Number(gear) || 1)));
+      const r = Math.max(0, Math.min(1, Number(rpm) || 0));
+      const t = s.ctx.currentTime;
+      const freq = 46 + r * 92 + g * 4;
+      const tc = g !== this.lastSimGear ? 0.06 : 0.1;
+      this.lastSimGear = g;
+      n.low.frequency.setTargetAtTime(freq, t, tc);
+      n.high.frequency.setTargetAtTime(freq * 2, t, tc);
+      n.lfo.frequency.setTargetAtTime(8 + r * 26, t, 0.08);
+      n.lp.frequency.setTargetAtTime(320 + r * 260, t, 0.08);
+    } catch (e) {
+      /* audio is optional */
+    }
+  }
+
   /** Fade out over ~0.5 s and release every node. Safe to call twice. */
   stop() {
     const n = this.nodes;

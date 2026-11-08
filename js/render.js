@@ -14,6 +14,15 @@ const lazy = (key, path) => {
 lazy('sky', './render-sky.js');
 lazy('road', './render-road.js');
 lazy('fx', './render-fx.js');
+// Circuit mode (sports cars, sim HUD): optional as well.
+import('./art-gt.js')
+  .then((m) => {
+    MOD.gt = m;
+    // circuit dressing (pit wall, gantry, brake boards ...) joins the sprite table
+    if (m.GT_SPRITES) for (const k of Object.keys(m.GT_SPRITES)) if (!SPRITES[k]) SPRITES[k] = m.GT_SPRITES[k];
+  })
+  .catch(() => {});
+lazy('simhud', './render-simhud.js');
 const safeCall = (fn, ...args) => {
   try {
     return fn(...args);
@@ -82,6 +91,44 @@ export function airLift(air) {
 const isNight = (race) => !!(race && race.course && race.course.def && race.course.def.night);
 const palOf = (id) => PALETTES[id] || PALETTES.meadow;
 
+// ---------- circuit mode ----------
+const isCircuit = (race) => !!(race && race.course && race.course.circuit === true);
+const CIRCUIT_PAL = {
+  sky: ['#5ab8f5', '#bfe6ff', '#eef8ff'],
+  grass: ['#5fae4a', '#579f43'],
+  rumble: ['#e8312f', '#ffffff'],
+  road: ['#5c5f68', '#585b64'],
+  lane: '#ffffff',
+  hills: ['#7fbf6a', '#6aae58'],
+};
+/** Scenery style used for the sky/backdrop/road verge of a circuit. */
+const circuitScenery = (race) => {
+  const d = race.course.def || {};
+  if (d.scenery && PALETTES[d.scenery]) return d.scenery;
+  if (d.base && PALETTES[d.base]) return d.base;
+  return race.courseId === 'coast' || d.id === 'coast' ? 'sea' : 'meadow';
+};
+/**
+ * Camera rigs. h = height above the road, back = distance behind the player in units of the
+ * classic chase distance (CAM_H * depth). 'tv' is a trackside camera handled separately.
+ */
+const CAMS = {
+  chase: { h: CAM_H, back: 1 },
+  far: { h: 1300, back: 1.8 },
+  bumper: { h: 330, back: 0.06 },
+  heli: { h: 3600, back: 3.4 },
+  tv: { h: 760, back: 1 },
+};
+export const PLAYER_CAMS = ['chase', 'far', 'bumper'];
+/** Start/finish line of every lap (cached on the course). */
+function course_lines(course) {
+  if (!course._lapSet) course._lapSet = new Set(course.startLines);
+  return course._lapSet;
+}
+const CAR_WORLD = 0.82; // sports-car width in road units
+const LINE_COLS = { go: 'rgba(58,160,255,', ease: 'rgba(255,205,40,', brake: 'rgba(240,50,40,' };
+
+
 export class Renderer {
   constructor(canvas) {
     this.cv = canvas;
@@ -118,6 +165,20 @@ export class Renderer {
     this._ft = [];
     this._fastSince = 0;
     this._qAt = 0;
+    // circuit mode: camera rig, replay flag, racing-line guide, sports-car sprite cache
+    this.camMode = 'chase';
+    this.replayMode = false;
+    this.showLine = true;
+    this.tvZ = null;
+    this.tvSide = 1;
+    this._carCache = new Map();
+  }
+
+  /** Cycle the driving cameras (chase → far → bumper). Returns the new mode. */
+  nextCamera() {
+    const i = PLAYER_CAMS.indexOf(this.camMode);
+    this.camMode = PLAYER_CAMS[(i + 1) % PLAYER_CAMS.length];
+    return this.camMode;
   }
 
   /** Auto quality: drop when frames are slow, climb back after a calm stretch. */
@@ -367,15 +428,25 @@ export class Renderer {
     this.tuneQuality(dt, t);
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const night = isNight(race);
-    if (this.bgCourse !== race.courseId || this.bgNight !== night) this.buildBackground(race.courseId, night);
-    if (MOD.sky && (!this.skyCache || this.skyCache._course !== race.courseId || this.skyCache._night !== night)) {
-      this.skyCache = safeCall(MOD.sky.buildSky, this, race.courseId, night) || null;
+    const circuit = isCircuit(race);
+    // circuits borrow the sky/backdrop of a matching scenery (coast → sea, otherwise meadow)
+    const visId = circuit ? circuitScenery(race) : race.courseId;
+    if (this.bgCourse !== visId || this.bgNight !== night) this.buildBackground(visId, night);
+    if (MOD.sky && (!this.skyCache || this.skyCache._course !== visId || this.skyCache._night !== night)) {
+      this.skyCache = safeCall(MOD.sky.buildSky, this, visId, night) || null;
       if (this.skyCache) {
-        this.skyCache._course = race.courseId;
+        this.skyCache._course = visId;
         this.skyCache._night = night;
       }
     }
-    const pal = palOf(race.courseId);
+    const pal = circuit ? CIRCUIT_PAL : palOf(race.courseId);
+    this._lapLines = circuit && Array.isArray(race.course.startLines) ? course_lines(race.course) : null;
+    // road style: circuits use the mown-grass verge (no beach/snow banks next to the tarmac)
+    const roadId = circuit ? 'meadow' : race.courseId;
+    // camera rig: alternative cameras only in circuit mode or a replay
+    const mode = (circuit || this.replayMode) && CAMS[this.camMode] ? this.camMode : 'chase';
+    const rig = CAMS[mode];
+    const projPlayer = mode !== 'chase'; // the player car is placed in the world, not pinned to the screen
     const course = race.course;
     this.goalIndex = course.goalIndex;
     const segs = course.segments;
@@ -383,21 +454,37 @@ export class Renderer {
     // field-of-view kick while boosting
     const wantDepth = p.boost > 0 && race.state === 'race' ? DEPTH * FOV_BOOST : DEPTH;
     this.depth += (wantDepth - this.depth) * Math.min(1, dt * (wantDepth < this.depth ? 5 : 2.5));
-    const camZ = p.z - CAM_H * this.depth;
-    const baseI = Math.max(0, Math.floor(camZ / SEGMENT_LENGTH));
+    let camZ = p.z - CAM_H * this.depth * rig.back;
+    let tvX = null;
+    if (mode === 'tv') {
+      // a trackside camera: it stays put while the cars drive away, then jumps ahead
+      const gap = this.tvZ === null ? -1 : p.z - this.tvZ;
+      if (gap < 250 || gap > 5200) {
+        this.tvZ = Math.max(0, p.z - 300);
+        this.tvSide = -this.tvSide;
+      }
+      camZ = this.tvZ;
+      tvX = this.tvSide * 1.55;
+    } else this.tvZ = null;
+    camZ = Math.max(0, camZ);
+    const baseI = Math.max(0, Math.min(segs.length - 1, Math.floor(camZ / SEGMENT_LENGTH)));
     const base = segs[baseI];
     const basePct = (camZ % SEGMENT_LENGTH) / SEGMENT_LENGTH;
     const pSeg = segs[Math.min(segs.length - 1, Math.floor(p.z / SEGMENT_LENGTH))];
     const pPct = (p.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
     const playerY = pSeg.y1 + (pSeg.y2 - pSeg.y1) * pPct;
-    // a gentle engine bob at speed (felt more than seen)
-    const bob = race.state === 'race' ? Math.sin(t * 13) * 6 * Math.min(1, race.speedPct) : 0;
-    const camY = playerY + CAM_H + bob;
-    const camXRoad = p.x * FOLLOW;
+    // a gentle engine bob at speed (felt more than seen); stronger and quicker in the bumper cam
+    const bobK = mode === 'bumper' ? 3 : mode === 'chase' ? 6 : 0;
+    const bob = race.state === 'race' ? Math.sin(t * (mode === 'bumper' ? 21 : 13)) * bobK * Math.min(1, race.speedPct) : 0;
+    const camRefY = mode === 'tv' ? base.y1 + (base.y2 - base.y1) * basePct : playerY;
+    const camY = camRefY + rig.h + bob;
+    const camXRoad = tvX !== null ? tvX : p.x * (mode === 'bumper' ? 1 : FOLLOW);
     const camX = camXRoad * ROAD_W;
+    this._mode = mode;
 
     // camera feel: lean into curves, shake on bumps. The world only; the HUD stays level.
-    const targetLean = race.state === 'race' ? clamp(pSeg.curve * race.speedPct * 0.012, -0.035, 0.035) : 0;
+    const leanK = mode === 'chase' ? 0.012 : mode === 'bumper' ? 0.02 : 0;
+    const targetLean = race.state === 'race' ? clamp(pSeg.curve * race.speedPct * leanK, -0.05, 0.05) : 0;
     this.lean += (targetLean - this.lean) * Math.min(1, dt * 6);
     if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);
     const sh = this.shakeT / SHAKE_T;
@@ -464,14 +551,14 @@ export class Renderer {
       let roadDone = false;
       if (MOD.road && !this._roadFail) {
         try {
-          MOD.road.drawRoadSegment(this, s, s.p1, s.p2, pal, race.courseId, s.fog);
+          MOD.road.drawRoadSegment(this, s, s.p1, s.p2, pal, roadId, s.fog);
           roadDone = true;
         } catch (e) {
           this._roadFail = true;
         }
       }
       if (!roadDone) {
-        this.drawSegment(s, pal, race.courseId);
+        this.drawSegment(s, pal, roadId);
         if (s.fog > 0.01) {
           c.globalAlpha = s.fog;
           c.fillStyle = fogCol;
@@ -480,6 +567,7 @@ export class Renderer {
         }
       }
       if (roadDone) this.drawSpecials(s);
+      if (circuit && this.showLine && n < 75 && !this.replayMode) this.drawRacingLine(s, course, n);
       maxy = s.p2.y;
       drawn.push(s);
     }
@@ -488,14 +576,24 @@ export class Renderer {
     const jump = race.jump > 0 ? Math.abs(Math.sin(race.jump * Math.PI * 3)) * 0.35 * (race.jump / 0.9) : 0;
     const rivalsBySeg = new Map();
     const behind = [];
+    const camNear = camZ + CAM_H * this.depth * 0.35; // closer than this to the camera: not drawn
     for (const r of race.rivals) {
-      if (r.z < p.z - RIVAL_BEHIND) continue; // too far back to see
-      if (r.z < p.z) {
-        behind.push(r); // right behind us: drawn over the player, big
-        continue;
+      if (projPlayer) {
+        // free cameras: every car ahead of the lens is drawn in depth order
+        if (r.z < camNear) continue;
+      } else {
+        if (r.z < p.z - RIVAL_BEHIND) continue; // too far back to see
+        if (r.z < p.z) {
+          behind.push(r); // right behind us: drawn over the player, big
+          continue;
+        }
       }
       const ri = Math.floor(r.z / SEGMENT_LENGTH);
       if (ri >= baseI && ri < baseI + DRAW) rivalsBySeg.set(ri, (rivalsBySeg.get(ri) || []).concat(r));
+    }
+    if (projPlayer && mode !== 'bumper' && p.z >= camNear) {
+      const pi = Math.floor(p.z / SEGMENT_LENGTH);
+      if (pi >= baseI && pi < baseI + DRAW) rivalsBySeg.set(pi, (rivalsBySeg.get(pi) || []).concat(p));
     }
     const nearGoal = this.goalIndex * SEGMENT_LENGTH - p.z < 6000;
     // the ghost: last best run, drawn see-through
@@ -568,13 +666,21 @@ export class Renderer {
       if (rv) {
         // farther first inside the segment, so nearer karts overlap them
         if (rv.length > 1) rv.sort((a, b) => b.z - a.z);
-        for (const ri of rv) this.drawRival(ri, s, race, t);
+        for (const ri of rv) {
+          if (ri === p) {
+            c.globalAlpha = 1;
+            this.drawPlayerInWorld(s, race, t);
+            c.globalAlpha = spriteFog;
+          } else this.drawRival(ri, s, race, t);
+        }
       }
       c.globalAlpha = 1;
     }
 
-    if (night) this.drawHeadlights(race, t, camXRoad);
-    this.drawPlayer(race, t, camXRoad);
+    if (!projPlayer) {
+      if (night) this.drawHeadlights(race, t, camXRoad);
+      this.drawPlayer(race, t, camXRoad);
+    } else if (mode === 'bumper') this.drawBumperView(race, t);
     if (ghostBehind) {
       const s = segs[ghostSeg];
       if (s && s.p1 && s.p2 && s.frame !== undefined && ghostSeg >= baseI && ghostSeg < baseI + DRAW) this.drawGhost(ghost, s, race, t);
@@ -602,8 +708,210 @@ export class Renderer {
     if (MOD.fx && !this._fxFail && this.quality >= 1) safeCall(MOD.fx.drawVignette, this, night ? 1.15 : 0.85);
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawHud(race, t);
+    if (this.replayMode) return; // replays are full-screen; the page shows its own REPLAY badge
+    let hudDone = false;
+    if (circuit && MOD.simhud && !this._simFail) {
+      try {
+        MOD.simhud.drawSimHud(this, race, t);
+        hudDone = true;
+      } catch (e) {
+        this._simFail = true;
+      }
+    }
+    if (!hudDone) this.drawHud(race, t);
     drawPhotoFinish(this, race, t);
+  }
+
+  // ---------- circuit mode ----------
+  /** The player's chosen sports car (falls back to a red coupe). */
+  playerCar(race) {
+    const c = race.car || race.playerCar || (race.player && race.player.car);
+    return c && c.model ? c : { model: 'gt', color: 'red', number: 1 };
+  }
+
+  /** Sports car rendered once per model/view/colour/number/brake and size bucket. */
+  carImage(car, view, brake, devW) {
+    const gt = MOD.gt;
+    if (!gt || !gt.drawSportsCar) return null;
+    const box = (gt.CAR_BOX && gt.CAR_BOX[view]) || [200, 130];
+    const bucket = devW < 56 ? 64 : devW < 120 ? 128 : devW < 240 ? 256 : devW < 480 ? 512 : 768;
+    const key = `${car.model}|${view}|${car.color}|${car.number}|${brake ? 1 : 0}|${bucket}`;
+    let img = this._carCache.get(key);
+    if (img === undefined) {
+      img = null;
+      try {
+        const k = bucket / box[0];
+        const cv = document.createElement('canvas');
+        cv.width = Math.ceil(box[0] * k);
+        cv.height = Math.ceil(box[1] * k);
+        const cx = cv.getContext('2d');
+        cx.scale(k, k);
+        gt.drawSportsCar(cx, car.model, view, car.color, car.number, { brake: !!brake });
+        img = cv;
+      } catch (e) {
+        img = null;
+      }
+      if (this._carCache.size > 160) this._carCache.clear();
+      this._carCache.set(key, img);
+    }
+    return img;
+  }
+
+  /**
+   * Draw a sports car standing on the road at (x, y) with on-screen width dw.
+   * Returns false when the art is not available (caller falls back to the kart sprite).
+   */
+  drawCar(car, x, y, dw, lift = 0, clip = 0, rot = 0, brake = false, view = 'rear') {
+    const img = this.carImage(car, view, brake, dw * this.dpr);
+    if (!img) return false;
+    const dh = dw * (img.height / img.width);
+    const c = this.c;
+    const top = y - dh - lift;
+    if (clip && top >= clip) return true;
+    const cut = clip && top + dh > clip ? (top + dh - clip) / dh : 0;
+    c.save();
+    c.translate(x, y - lift);
+    if (rot) c.rotate(rot);
+    c.drawImage(img, 0, 0, img.width, img.height * (1 - cut), -dw / 2, -dh, dw, dh * (1 - cut));
+    c.restore();
+    if (brake && MOD.fx && !this._fxFail && this.quality >= 1) {
+      for (const sd of [-1, 1]) safeCall(MOD.fx.drawBloom, this, x + sd * dw * 0.34, y - dh * 0.52 - lift, Math.max(5, dw * 0.16), 'rgba(255,40,40,1)', 0.7);
+    }
+    return true;
+  }
+
+  /** Player car placed in the world (far / heli / tv cameras). */
+  drawPlayerInWorld(s, race, t) {
+    const p = race.player;
+    const f = (p.z % SEGMENT_LENGTH) / SEGMENT_LENGTH;
+    const rx = s.p1.x + (s.p2.x - s.p1.x) * f;
+    const ry = s.p1.y + (s.p2.y - s.p1.y) * f;
+    const rr = s.p1.r + (s.p2.r - s.p1.r) * f;
+    const x = rx + rr * p.x * this.SX;
+    const clip = s.clip || 0;
+    const circuit = isCircuit(race);
+    const dw = (circuit ? CAR_WORLD : 0.8) * rr * this.SX;
+    if (dw < 2) return;
+    const air = airLift(p.air);
+    const lift = air * dw * 0.55;
+    if (MOD.fx && !this._fxFail && dw > 6) safeCall(MOD.fx.drawSoftShadow, this, x, ry - dw * 0.02, dw * 1.05, dw * 0.22, 0.55);
+    const rot = (typeof p.steer === 'number' ? p.steer : 0) * 0.04;
+    let done = false;
+    if (circuit) done = this.drawCar(this.playerCar(race), x, ry, dw, lift, clip, rot, !!race.braking);
+    if (!done) {
+      const id = 'rear-' + race.vehicle;
+      if (SPRITES[id]) this.sprite(id, 0, x, ry, rr, 0.8, lift, clip, rot);
+    }
+    this.carX = x;
+    this.carY = ry - dw * 0.4;
+  }
+
+  /** Bumper camera: no car on screen, just the tip of the bonnet and a little vibration. */
+  drawBumperView(race, t) {
+    const c = this.c;
+    const { W, H } = this;
+    const car = this.playerCar(race);
+    let col = '#d3172b';
+    const gt = MOD.gt;
+    if (gt && gt.CAR_COLORS) {
+      const hit = gt.CAR_COLORS.find((k) => k.id === car.color);
+      if (hit) col = hit.hex;
+      else if (typeof car.color === 'string' && car.color[0] === '#') col = car.color;
+    }
+    const shade = gt && gt.shade ? gt.shade : (h) => h;
+    const top = H - Math.min(H * 0.16, 130);
+    const sway = Math.sin(t * 23) * (race.state === 'race' ? 1.2 * Math.min(1, race.speedPct) : 0);
+    c.save();
+    c.translate(0, sway);
+    // bonnet: a wide, gently curved panel
+    c.beginPath();
+    c.moveTo(-OVER, H + OVER);
+    c.lineTo(-OVER, top + 40);
+    c.quadraticCurveTo(W / 2, top - 24, W + OVER, top + 40);
+    c.lineTo(W + OVER, H + OVER);
+    c.closePath();
+    const g = c.createLinearGradient(0, top - 20, 0, H);
+    g.addColorStop(0, shade(col, 0.25));
+    g.addColorStop(0.35, col);
+    g.addColorStop(1, shade(col, -0.45));
+    c.fillStyle = g;
+    c.fill();
+    // reflection of the sky and a racing stripe
+    c.globalAlpha = 0.28;
+    c.fillStyle = '#ffffff';
+    c.beginPath();
+    c.ellipse(W * 0.42, top + 26, W * 0.3, 7, -0.02, 0, Math.PI * 2);
+    c.fill();
+    c.globalAlpha = 0.85;
+    c.fillStyle = car.color === 'white' || car.color === 'silver' || car.color === 'yellow' ? '#24262b' : '#ffffff';
+    c.beginPath();
+    c.moveTo(W / 2 - 14, top + 8);
+    c.lineTo(W / 2 + 14, top + 8);
+    c.lineTo(W / 2 + 34, H + OVER);
+    c.lineTo(W / 2 - 34, H + OVER);
+    c.closePath();
+    c.fill();
+    c.globalAlpha = 1;
+    c.restore();
+    this.carX = W / 2;
+    this.carY = top;
+  }
+
+  /** Lateral position of the ideal line for every segment (cached on the course). */
+  racingLine(course) {
+    if (course._line) return course._line;
+    const segs = course.segments;
+    const n = segs.length;
+    const raw = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let k = 0; k < 14; k++) sum += (segs[Math.min(n - 1, i + k)].curve || 0) * (1 - k / 18);
+      raw[i] = clamp((sum / 14) * 0.2, -0.6, 0.6);
+    }
+    const line = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      let cnt = 0;
+      for (let k = -6; k <= 6; k++) {
+        const j = i + k;
+        if (j < 0 || j >= n) continue;
+        sum += raw[j];
+        cnt++;
+      }
+      line[i] = sum / cnt;
+    }
+    course._line = line;
+    return line;
+  }
+
+  /** Driving-line guide painted on the tarmac: blue = full speed, yellow = lift, red = auto-brake. */
+  drawRacingLine(s, course, n) {
+    if (s.boost) return;
+    const line = this.racingLine(course);
+    const i = s.index;
+    const j = Math.min(line.length - 1, i + 1);
+    const v = course.brake ? course.brake[i] : 1;
+    const key = v >= 0.93 ? 'go' : v >= 0.8 ? 'ease' : 'brake';
+    const a = 0.5 * (1 - (s.fog || 0)) * (n < 3 ? n / 3 : 1);
+    if (a <= 0.02) return;
+    const hw = 0.085;
+    const p1 = s.p1;
+    const p2 = s.p2;
+    const x1 = p1.x + line[i] * p1.w;
+    const x2 = p2.x + line[j] * p2.w;
+    this.poly(x1 - hw * p1.w, p1.y, x1 + hw * p1.w, p1.y, x2 + hw * p2.w, p2.y, x2 - hw * p2.w, p2.y, LINE_COLS[key] + a.toFixed(3) + ')');
+    if (i % 4 === 0 && p1.w > 40) {
+      // chevrons pointing down the track
+      const c = this.c;
+      const ym = (p1.y + p2.y) / 2;
+      c.fillStyle = `rgba(255,255,255,${(a * 0.9).toFixed(3)})`;
+      c.beginPath();
+      c.moveTo(x1 - hw * 0.8 * p1.w, p1.y);
+      c.lineTo((x1 + x2) / 2, ym);
+      c.lineTo(x1 + hw * 0.8 * p1.w, p1.y);
+      c.closePath();
+      c.fill();
+    }
   }
 
   /** One rival kart, interpolated inside its segment (works ahead of and behind the player). */
@@ -616,7 +924,12 @@ export class Renderer {
     const rx = s.p1.x + (s.p2.x - s.p1.x) * f;
     const ry = s.p1.y + (s.p2.y - s.p1.y) * f;
     let rr = s.p1.r + (s.p2.r - s.p1.r) * f;
-    const behindP = ri.z < race.player.z;
+    const behindP = ri.z < race.player.z && this._mode === 'chase';
+    if (this._mode !== 'chase') {
+      // free cameras: a car right in front of the lens must not fill the whole screen
+      const maxR = (this.W * 0.45) / (0.8 * this.SX);
+      if (rr > maxR) rr = maxR;
+    }
     if (behindP) {
       // a kart right behind us would fill the screen: keep it at most about our own size
       const maxR = (this.carW * 1.0) / (0.75 * this.SX);
@@ -646,9 +959,17 @@ export class Renderer {
       if (sw > 6) safeCall(MOD.fx.drawSoftShadow, this, x, ry - sw * 0.02, sw * 1.05, sw * 0.22, 0.55);
     }
     const prevA = this.c.globalAlpha;
-    if (behindP) this.c.globalAlpha = prevA * 0.85;
-    this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, x, ry, rr, 0.75, hop * rr * this.SX, clip, rot);
+    if (behindP && this._mode === 'chase') this.c.globalAlpha = prevA * 0.85;
+    const circuit = isCircuit(race);
+    let drawnCar = false;
+    if (circuit && ri.car) {
+      // sports car: no cartoon hop, a real lean in the bends, brake lights when slowing
+      const lean = clamp((ri.laneTarget !== undefined ? ri.laneTarget - ri.x : 0) * 0.08, -0.05, 0.05) + rot * 0.5;
+      drawnCar = this.drawCar(ri.car, x, ry, CAR_WORLD * rr * this.SX, air * 0.9 * rr * this.SX, clip, lean, !!ri.braking);
+    }
+    if (!drawnCar) this.sprite('kart-' + ri.animal + (cheer ? '-cheer' : ''), 0, x, ry, rr, 0.75, hop * rr * this.SX, clip, rot);
     this.c.globalAlpha = prevA;
+    if (circuit) return; // circuits: no cartoon name tags or kart tail lights
     if (isNight(race) && (!clip || ry < clip)) {
       // tail lights so karts read at night
       const c = this.c;
@@ -812,7 +1133,7 @@ export class Renderer {
       c.lineTo(m1 - aw1 * 0.5, p1.y);
       c.closePath();
       c.fill();
-    } else if (s.index === START_LINE || s.index === this.goalIndex) {
+    } else if (s.index === START_LINE || s.index === this.goalIndex || (this._lapLines && this._lapLines.has(s.index))) {
       this.checker(p1, p2);
     }
     if (s.ramp) this.drawRamp(s);
@@ -1085,7 +1406,8 @@ export class Renderer {
     if (fx && air <= 0) safeCall(fx.drawSoftShadow, this, x, y - w * 0.03, w * 1.05, w * 0.24, 0.6);
     const frame = race.vehicle === 'dino' ? Math.floor(t * 6) % 4 : 0;
     const id = 'rear-' + race.vehicle + (frame ? '-' + frame : '');
-    this.sprite(id, 0, x, y, 1, 0, lift, 0, rot, w);
+    const circuitCar = isCircuit(race) && this.drawCar(this.playerCar(race), x, y, w * 1.08, lift, 0, rot * 0.6, !!race.braking);
+    if (!circuitCar) this.sprite(id, 0, x, y, 1, 0, lift, 0, rot, w);
     if (fx && race.vehicle !== 'dino' && race.state !== 'countdown' || fx && p.boost > 0) {
       // exhaust haze (blue flame while boosting) from the pipes under the bumper
       for (const sd of [-1, 1]) safeCall(fx.drawExhaust, this, x + sd * w * 0.24, y - w * 0.1 - lift, w / 100, p.boost > 0, t);

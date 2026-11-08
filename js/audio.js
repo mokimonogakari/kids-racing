@@ -128,6 +128,7 @@ export class Sound {
 
   suspend() {
     this.nightStop();
+    this.crowdStop();
     try {
       if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
     } catch (e) {}
@@ -367,6 +368,7 @@ export class Sound {
   engineStop() {
     this.rivalEngineStop();
     this.nightStop();
+    this.crowdStop();
     if (!this.engine) return;
     const e = this.engine;
     this.engine = null;
@@ -520,6 +522,7 @@ export class Sound {
   nightAmbience(on = true) {
     if (!on) {
       this.nightStop();
+    this.crowdStop();
       return;
     }
     if (this.night || !this.ok()) return;
@@ -574,6 +577,83 @@ export class Sound {
     } catch (e) {}
   }
 
+  // ---- circuit mode ----
+  engineGear(gear, rpm) {
+    try {
+      this.engine?.engineGear?.(gear, rpm);
+    } catch (e) {}
+  }
+  gearShift() {
+    this.sfxCall(sfx.gearShift);
+  }
+  brakeSquealSoft() {
+    this.sfxCall(sfx.brakeSquealSoft);
+  }
+  lapBeep(best = false) {
+    this.sfxCall(sfx.lapBeep, !!best);
+  }
+  /** Circuit crowd murmur. crowdAmbience(false), engineStop(), stopMusic() and suspend() stop it. */
+  crowdAmbience(on = true) {
+    if (!on) {
+      this.crowdStop();
+      return;
+    }
+    if (this.crowdAmb || !this.ok()) return;
+    try {
+      const c = this.ctx;
+      const t = c.currentTime;
+      const out = c.createGain();
+      out.gain.setValueAtTime(0.0001, t);
+      out.gain.exponentialRampToValueAtTime(0.05, t + 1.5);
+      out.connect(this.sfx);
+      const buf = this.noiseBuf || (() => {
+        const b = c.createBuffer(1, c.sampleRate, c.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        return b;
+      })();
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 900;
+      bp.Q.value = 0.5;
+      const swell = c.createGain();
+      swell.gain.value = 1;
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 0.15;
+      const lg = c.createGain();
+      lg.gain.value = 0.35;
+      lfo.connect(lg);
+      lg.connect(swell.gain);
+      src.connect(bp);
+      bp.connect(swell);
+      swell.connect(out);
+      src.start(t);
+      lfo.start(t);
+      this.crowdAmb = { out, nodes: [src, lfo] };
+    } catch (e) {
+      this.crowdAmb = null;
+    }
+  }
+  crowdStop() {
+    const n = this.crowdAmb;
+    if (!n) return;
+    this.crowdAmb = null;
+    try {
+      const t = this.ctx ? this.ctx.currentTime : 0;
+      n.out.gain.cancelScheduledValues(t);
+      n.out.gain.setTargetAtTime(0.0001, t, 0.25);
+      for (const o of n.nodes) o.stop(t + 1);
+      setTimeout(() => {
+        try {
+          n.out.disconnect();
+        } catch (e) {}
+      }, 1200);
+    } catch (e) {}
+  }
+
   sfxCall(fn, ...args) {
     if (typeof fn !== 'function' || !this.ok()) return;
     try {
@@ -604,6 +684,7 @@ export class Sound {
 
   stopMusic() {
     this.nightStop();
+    this.crowdStop();
     this.track = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;

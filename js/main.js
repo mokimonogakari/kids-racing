@@ -62,15 +62,32 @@ const app = {
   lastResult: null,
   recordInfo: null,
   earned: [],
-  mode: 'single', // 'single' | 'gp'
+  mode: 'single', // 'single' | 'gp' | 'circuit'
   gp: null,
+  circuit: 'coast',
+  car: { model: 'gt', color: '#e8344a', number: 7 },
+  replay: null,
 };
 
 // Voice lines that may not exist yet in voice-lines.js get a plain fallback.
 const say = (fn, fallback, ...args) => (typeof L[fn] === 'function' ? L[fn](...args) : fallback);
 const STAT_LABEL = { speed: 'はやさ', accel: 'かそく', grip: 'まがる' };
 const COURSE_NAME = { meadow: 'はらっぱ', sea: 'うみ', snow: 'ゆきやま' };
-const racerName = (id) => (id === 'player' ? 'あなた' : (L.RIVAL_NAMES && L.RIVAL_NAMES[id]) || id);
+const racerName = (id) => {
+  if (id === 'player') return 'あなた';
+  if (app.mode === 'circuit') {
+    const car = rivalCar(id);
+    if (car && car.number != null) return `No.${car.number}`;
+  }
+  return (L.RIVAL_NAMES && L.RIVAL_NAMES[id]) || id;
+};
+/** Sports-car info of a circuit rival (by racer id), or null. */
+function rivalCar(id) {
+  const rs = app.race && app.race.rivals;
+  if (!Array.isArray(rs)) return null;
+  const r = rs.find((o) => o.animal === id || o.id === id);
+  return (r && r.car) || null;
+}
 const shortName = (id) => racerName(id).replace(/さん$/, '');
 
 // ---------------------------------------------------------------- audio unlock
@@ -108,11 +125,14 @@ function show(name) {
     sec.hidden = !on;
     sec.classList.toggle('enter', on);
   }
-  document.body.classList.toggle('racing', ['race', 'goal', 'standings', 'cup'].includes(name));
-  if (name === 'title' || name === 'vehicle' || name === 'course' || name === 'book') {
+  document.body.classList.toggle('racing', ['race', 'goal', 'standings', 'cup', 'replay'].includes(name));
+  document.body.classList.toggle('circuit-mode', app.mode === 'circuit' && ['race', 'goal', 'replay'].includes(name));
+  if (name === 'title' || name === 'vehicle' || name === 'course' || name === 'book' || name === 'garage' || name === 'circuit') {
     sound.playMusic('menu');
     sound.nightAmbience?.(false);
+    sound.crowdAmbience?.(false);
   }
+  if (name !== 'garage') stopGarageSpin();
 }
 
 function go(name) {
@@ -128,6 +148,11 @@ function go(name) {
     show('course');
     paintMenus();
     voice.say('どこを はしる？', { interrupt: false });
+  } else if (name === 'garage') {
+    app.mode = 'circuit';
+    openGarage();
+  } else if (name === 'circuit') {
+    openCircuitSelect();
   } else if (name === 'book') {
     buildBook();
     show('book');
@@ -322,6 +347,9 @@ function startRace() {
     hooks: raceHooks(),
   });
   show('race');
+  const camBtn = $('#btn-cam');
+  if (camBtn) camBtn.hidden = true;
+  renderer.camMode = 'chase';
   sound.playMusic(COURSES[app.course].music);
   updateStarHud();
   btnBoost?.classList.remove('ready', 'fire');
@@ -362,8 +390,7 @@ function buildGridIntro() {
     entries.forEach((e, i) => {
       const cv = el.children[i] && $('canvas', el.children[i]);
       if (!cv) return;
-      if (e.id === 'player') paintVehicle(cv, app.vehicle);
-      else paintKart(cv, e.id, 0);
+      paintRacer(cv, e.id, 0);
     });
   });
   voice.say(say('gridIntroLine', 'みんな ならんだよ！'), { interrupt: false });
@@ -533,8 +560,10 @@ function onGoal(result) {
   app.lastResult = result;
   app.earned = earned;
   app.fresh = book.add(earned);
-  app.recordInfo = records.update(app.course, result);
+  app.recordInfo = records.update(app.mode === 'circuit' ? 'circuit-' + app.circuit : app.course, result);
+  if (app.mode === 'circuit') sound.crowdAmbience?.(true);
   try {
+    if (app.mode === 'circuit') throw new Error('no ghosts on circuits');
     const trace = result.trace || (app.race && app.race.trace);
     if (ghosts && Array.isArray(trace) && trace.length > 1) {
       app.recordInfo.newGhost = !!ghosts.offer(app.course, { time: result.raceTime, vehicle: app.vehicle, trace });
@@ -576,8 +605,9 @@ function paintGoal() {
     c.translate((w - s) / 2, (h - s) / 2);
     drawMedal(c, rank, s);
   });
-  // The winner wears the flower crown.
-  paintVehicle($('.goal-car'), app.vehicle, rank === 1);
+  // The winner wears the flower crown (circuit: the sports car, side-on).
+  if (app.mode === 'circuit') paintSportsCar($('.goal-car'), app.car.model, 'front34', app.car.color, app.car.number);
+  else paintVehicle($('.goal-car'), app.vehicle, rank === 1);
 
   // Podium: 2nd, 1st, 3rd.
   const podium = $('#podium');
@@ -601,10 +631,7 @@ function paintGoal() {
       podium.appendChild(step);
       steps.push([cv, entry]);
     }
-    for (const [cv, entry] of steps) {
-      if (entry.id === 'player') paintVehicle(cv, app.vehicle);
-      else paintKart(cv, entry.id, 1);
-    }
+    for (const [cv, entry] of steps) paintRacer(cv, entry.id, 1);
   }
 
   // Not on the podium? Show where you came in, with your own car.
@@ -612,7 +639,7 @@ function paintGoal() {
   if (yp) {
     if (rank >= 4) {
       yp.hidden = false;
-      paintVehicle($('canvas', yp), app.vehicle);
+      paintRacer($('canvas', yp), 'player');
       const b = $('b', yp);
       if (b) b.textContent = `${rank}い`;
     } else {
@@ -653,8 +680,7 @@ function paintGoal() {
     });
     for (const [row, e] of rows) {
       const cv = $('canvas', row);
-      if (e.id === 'player') paintVehicle(cv, app.vehicle);
-      else paintKart(cv, e.id, 0);
+      paintRacer(cv, e.id, 0);
     }
   }
   const gpMode = app.mode === 'gp' && !!app.gp;
@@ -662,17 +688,460 @@ function paintGoal() {
   if (bNext) bNext.hidden = !gpMode;
   $('#btn-again').hidden = gpMode;
   $('#btn-other').hidden = gpMode;
+  paintLaps(result);
 
   // One-line record: place, stars, time, and any new best.
   const info = app.recordInfo || {};
-  let line = `🏁 ${rank}い　⭐ ${result.stars}こ　⏱ ${formatTime(result.raceTime || 0)}`;
+  let line = app.mode === 'circuit'
+    ? `🏁 ${rank}い　⏱ ${formatTime(result.raceTime || 0)}${Number.isFinite(result.bestLap) ? `　ベストラップ ${formatTime(result.bestLap)}` : ''}`
+    : `🏁 ${rank}い　⭐ ${result.stars}こ　⏱ ${formatTime(result.raceTime || 0)}`;
   if (info.newBestTime) line += ' 🎉 しんきろく！';
   if (info.firstWin) line += ' 🏆 はじめての ゆうしょう！';
   $('#race-record').textContent = line;
 }
 
+
+// ---------------------------------------------------------------- circuit mode
+// Modules for the circuit mode load lazily, so a missing file never blocks the kids' modes.
+const gt = { circuit: null, art: null, replay: null };
+const gtReady = Promise.all([
+  import('./circuit.js').then((m) => (gt.circuit = m)).catch(() => {}),
+  import('./art-gt.js').then((m) => (gt.art = m)).catch(() => {}),
+  import('./replay.js').then((m) => (gt.replay = m)).catch(() => {}),
+]);
+const CIRCUIT_FALLBACK = {
+  coast: { id: 'coast', label: 'うみぞい サーキット', base: 'sea', music: 'sea' },
+  mountain: { id: 'mountain', label: 'やまの サーキット', base: 'meadow', music: 'meadow' },
+};
+const MODEL_FALLBACK = ['gt', 'proto', 'hatch'];
+const COLOR_FALLBACK = ['#e8344a', '#2f6fe0', '#f4f4f4', '#ffd23f', '#22262e', '#2fb36a', '#ff8a1f', '#9b5de5'];
+const MODEL_STATS = { gt: { speed: 4, accel: 3, grip: 3 }, proto: { speed: 5, accel: 3, grip: 4 }, hatch: { speed: 3, accel: 5, grip: 4 } };
+const CAR_VIEWS = ['front34', 'side', 'rear'];
+const CIRCUIT_LAPS = FAST ? 2 : 3;
+
+function circuitDefs() {
+  return (gt.circuit && gt.circuit.CIRCUITS) || CIRCUIT_FALLBACK;
+}
+function carModels() {
+  const m = gt.art && gt.art.CAR_MODELS;
+  let list = null;
+  if (Array.isArray(m)) list = m.map((x) => (typeof x === 'string' ? x : x && x.id)).filter(Boolean);
+  else if (m && typeof m === 'object') list = Object.keys(m);
+  if (!list || !list.length) list = (gt.circuit && gt.circuit.CAR_MODEL_IDS) || MODEL_FALLBACK;
+  return list;
+}
+function carColors() {
+  const m = gt.art && gt.art.CAR_COLORS;
+  const raw = Array.isArray(m) ? m : m && typeof m === 'object' ? Object.values(m) : null;
+  const list = raw
+    ? raw.map((x) => (typeof x === 'string' ? x : x && (x.hex || x.color || x.value || x.body))).filter((x) => typeof x === 'string')
+    : [];
+  return list.length ? list : COLOR_FALLBACK;
+}
+/** Native drawing box of drawSportsCar for a view (art-gt.js may export it; else a sane guess). */
+function carBox(model, view) {
+  const a = gt.art || {};
+  const b = (typeof a.carBox === 'function' && a.carBox(model, view)) || (a.CAR_BOX && (a.CAR_BOX[view] || a.CAR_BOX[model])) || null;
+  if (b && Array.isArray(b)) return { w: b[0], h: b[1] };
+  if (b && b.w) return b;
+  return view === 'side' ? { w: 240, h: 110 } : { w: 200, h: 140 };
+}
+function paintSportsCar(cv, model, view, color, number) {
+  paintCanvas(cv, (c, w, h) => {
+    if (!(gt.art && typeof gt.art.drawSportsCar === 'function')) {
+      const s = Math.min(w, h) / 100;
+      c.translate((w - 100 * s) / 2, (h - 100 * s) / 2);
+      c.scale(s, s);
+      drawVehicleFront(c, 'car', 0);
+      return;
+    }
+    const box = carBox(model, view);
+    const s = Math.min(w / box.w, h / box.h) * 0.94;
+    c.translate((w - box.w * s) / 2, (h - box.h * s) / 2);
+    c.scale(s, s);
+    try {
+      gt.art.drawSportsCar(c, model, view, color, number, {});
+    } catch (e) {
+      /* art is optional */
+    }
+  });
+}
+
+let garageSpin = 0;
+let garageView = 0;
+function stopGarageSpin() {
+  clearInterval(garageSpin);
+  garageSpin = 0;
+}
+function paintGarageCar() {
+  const cv = $('#garage-car');
+  if (!cv) return;
+  paintSportsCar(cv, app.car.model, CAR_VIEWS[garageView % CAR_VIEWS.length], app.car.color, app.car.number);
+  cv.classList.remove('turning');
+  void cv.offsetWidth;
+  cv.classList.add('turning');
+}
+function buildGarage() {
+  const models = carModels();
+  const colors = carColors();
+  if (!models.includes(app.car.model)) app.car.model = models[0];
+  if (!colors.includes(app.car.color)) app.car.color = colors[0];
+  const mBox = $('.garage-models');
+  mBox.innerHTML = '';
+  for (const id of models) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'listitem');
+    b.setAttribute('aria-label', (L.CAR_MODEL_NAMES && L.CAR_MODEL_NAMES[id]) || id);
+    b.setAttribute('aria-pressed', String(id === app.car.model));
+    b.dataset.model = id;
+    b.innerHTML = '<canvas aria-hidden="true"></canvas>';
+    b.addEventListener('click', () => {
+      app.car.model = id;
+      sound.horn?.('car');
+      voice.say(say('garageLine', 'かっこいい！', id));
+      syncGarage();
+    });
+    mBox.appendChild(b);
+  }
+  const cBox = $('.garage-colors');
+  cBox.innerHTML = '';
+  for (const col of colors) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'listitem');
+    b.setAttribute('aria-label', 'いろ');
+    b.setAttribute('aria-pressed', String(col === app.car.color));
+    b.dataset.color = col;
+    b.style.background = col;
+    b.addEventListener('click', () => {
+      app.car.color = col;
+      sound.pop();
+      syncGarage();
+    });
+    cBox.appendChild(b);
+  }
+  syncGarage();
+}
+function syncGarage() {
+  for (const b of $$('.garage-models button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.model === app.car.model));
+    paintSportsCar($('canvas', b), b.dataset.model, 'side', app.car.color, app.car.number);
+  }
+  for (const b of $$('.garage-colors button')) b.setAttribute('aria-pressed', String(b.dataset.color === app.car.color));
+  const artModel = gt.art && Array.isArray(gt.art.CAR_MODELS) ? gt.art.CAR_MODELS.find((m) => m && m.id === app.car.model) : null;
+  const raw = (artModel && artModel.stats) || MODEL_STATS[app.car.model] || MODEL_STATS.gt;
+  const st = {};
+  for (const k of ['speed', 'accel', 'grip']) st[k] = Math.max(1, Math.min(5, Math.round(Number(raw[k]) || 3)));
+  const el = $('.garage-stats');
+  if (el) {
+    el.innerHTML = ['speed', 'accel', 'grip']
+      .map((k) => `<i>${STAT_LABEL[k]} ${'<b></b>'.repeat(st[k])}${'<s></s>'.repeat(5 - st[k])}</i>`)
+      .join('');
+  }
+  paintGarageCar();
+}
+function openGarage() {
+  show('garage');
+  gtReady.then(() => {
+    if (app.screen !== 'garage') return;
+    buildGarage();
+    stopGarageSpin();
+    garageSpin = setInterval(() => {
+      if (app.screen !== 'garage') return stopGarageSpin();
+      garageView++;
+      paintGarageCar();
+    }, 1800);
+  });
+  voice.say(say('circuitLine', 'サーキットで しょうぶ！'));
+  voice.say('どの くるまに する？', { interrupt: false });
+}
+
+/** One lap of a circuit as a polyline (0..1 box) for the selection cards. */
+function circuitOutline(id) {
+  try {
+    if (!gt.circuit || typeof gt.circuit.generateCircuit !== 'function') return null;
+    const course = gt.circuit.generateCircuit(id, { laps: 1, seed: 1 });
+    const n = course.lapLength || course.segments.length;
+    let x = 0;
+    let y = 0;
+    let hd = 0;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      hd += (course.segments[i].curve || 0) * 0.02;
+      x += Math.sin(hd);
+      y -= Math.cos(hd);
+      pts.push([x, y]);
+    }
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const span = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY) || 1;
+    return pts.map(([px, py]) => [(px - minX) / span, (py - minY) / span]);
+  } catch (e) {
+    return null;
+  }
+}
+function paintCircuitCard(cv, id, def) {
+  paintCanvas(cv, (c, w, h) => {
+    const sea = def.base === 'sea';
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, sea ? '#7fd3ff' : '#a9e07a');
+    g.addColorStop(1, sea ? '#2f8fd8' : '#4f9e3a');
+    c.fillStyle = g;
+    c.fillRect(0, 0, w, h);
+    const pts = circuitOutline(id);
+    if (!pts) return;
+    const pad = Math.min(w, h) * 0.16;
+    const sz = Math.min(w, h) - pad * 2;
+    const ox = (w - sz) / 2;
+    const oy = (h - sz) / 2 - h * 0.04;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    const path = () => {
+      c.beginPath();
+      pts.forEach(([px, py], i) => (i ? c.lineTo(ox + px * sz, oy + py * sz) : c.moveTo(ox + px * sz, oy + py * sz)));
+    };
+    path();
+    c.strokeStyle = '#1b1e25';
+    c.lineWidth = Math.max(8, w * 0.07);
+    c.stroke();
+    path();
+    c.strokeStyle = '#5b606c';
+    c.lineWidth = Math.max(5, w * 0.045);
+    c.stroke();
+    path();
+    c.setLineDash([w * 0.02, w * 0.02]);
+    c.strokeStyle = 'rgba(255,255,255,.75)';
+    c.lineWidth = Math.max(1, w * 0.006);
+    c.stroke();
+    c.setLineDash([]);
+    const [sx, sy] = pts[0];
+    c.fillStyle = '#fff';
+    c.fillRect(ox + sx * sz - w * 0.03, oy + sy * sz - w * 0.012, w * 0.06, w * 0.024);
+  });
+}
+function openCircuitSelect() {
+  const grid = $('.grid.circuits');
+  grid.classList.remove('picked');
+  grid.innerHTML = '';
+  const defs = circuitDefs();
+  for (const id of Object.keys(defs)) {
+    const def = defs[id];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'card circuit-card';
+    b.setAttribute('role', 'listitem');
+    b.setAttribute('aria-label', def.label);
+    b.dataset.circuit = id;
+    b.innerHTML = `<canvas aria-hidden="true"></canvas><span class="label" aria-hidden="true">${def.label}</span>`;
+    b.addEventListener('click', () => {
+      if (app.busy) return;
+      app.busy = true;
+      app.circuit = id;
+      sound.pop();
+      b.classList.add('chosen');
+      grid.classList.add('picked');
+      voice.say(def.label + '！');
+      setTimeout(() => {
+        app.busy = false;
+        startCircuitRace();
+      }, 900);
+    });
+    grid.appendChild(b);
+  }
+  show('circuit');
+  requestAnimationFrame(() => {
+    for (const b of $$('.circuit-card')) paintCircuitCard($('canvas', b), b.dataset.circuit, defs[b.dataset.circuit]);
+  });
+  voice.say('どの サーキットを はしる？', { interrupt: false });
+}
+
+function circuitHooks() {
+  const base = raceHooks();
+  return {
+    ...base,
+    lap: (n, time, best) => {
+      const laps = (app.race && app.race.course && app.race.course.laps) || CIRCUIT_LAPS;
+      sound.lapBeep?.(!!best);
+      if (best && n > 1) {
+        flashText('ベストラップ！');
+        voice.say(say('bestLapLine', 'ベストラップ！'), { interrupt: true });
+      }
+      if (n + 1 < laps) voice.say(say('lapLine', `${n + 1}しゅうめ！`, n + 1, laps), { interrupt: !best });
+    },
+    finalLap: () => {
+      const laps = (app.race && app.race.course && app.race.course.laps) || CIRCUIT_LAPS;
+      flashText('ファイナルラップ');
+      sound.setTempo?.(1.12);
+      voice.say(say('lapLine', 'さいごの いっしゅう！', laps, laps), { interrupt: false });
+    },
+  };
+}
+
+function startCircuitRace() {
+  app.mode = 'circuit';
+  clearInput();
+  resumeRace();
+  clearTimeout(app.goalTimer);
+  clearInterval(app.fireworkTimer);
+  renderer.particles.length = 0;
+  renderer.flyers.length = 0;
+  announcer.reset();
+  sound.setTempo?.(1);
+  app.replay = null;
+  app.ghost = null;
+  app.vehicle = 'car';
+  const seed = params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9);
+  app.race = new Race({
+    circuit: app.circuit,
+    car: { ...app.car },
+    course: 'meadow',
+    vehicle: 'car',
+    speed: settings.speed,
+    rivals: settings.rivals,
+    laps: CIRCUIT_LAPS,
+    seed,
+    hooks: circuitHooks(),
+  });
+  if (!app.race.playerCar) app.race.playerCar = { ...app.car };
+  renderer.camMode = renderer.camMode && renderer.camMode !== 'tv' && renderer.camMode !== 'heli' ? renderer.camMode : 'chase';
+  show('race');
+  const def = circuitDefs()[app.circuit] || {};
+  sound.playMusic(def.music || 'meadow');
+  sound.crowdAmbience?.(true);
+  $('#btn-cam').hidden = false;
+  btnBoost?.classList.remove('ready', 'fire');
+  buildGridIntro();
+  app.gearWas = 1;
+  app.brakeAt = 0;
+  voice.say(say('circuitLine', 'サーキットで 3しゅう しょうぶ！'));
+  voice.say(L.startLine(), { interrupt: false });
+  lastT = 0;
+}
+
+const CAM_MODES = ['chase', 'far', 'bumper'];
+function cycleCamera() {
+  const i = CAM_MODES.indexOf(renderer.camMode);
+  renderer.camMode = CAM_MODES[(i + 1) % CAM_MODES.length];
+  flashText({ chase: 'カメラ うしろ', far: 'カメラ とおく', bumper: 'カメラ まえ' }[renderer.camMode]);
+}
+
+/** Gear shifts and brakes are heard, not seen. */
+function circuitAudio(race) {
+  const p = race.player || {};
+  if (Number.isFinite(p.gear)) {
+    sound.engineGear?.(p.gear, Number.isFinite(p.rpm) ? p.rpm : 0.5);
+    if (p.gear > (app.gearWas || 1) && race.state === 'race') sound.gearShift?.();
+    app.gearWas = p.gear;
+  }
+  const now = performance.now();
+  if (race.braking && !app.wasBraking && now - (app.brakeAt || 0) > 2500 && race.state === 'race') {
+    app.brakeAt = now;
+    sound.brakeSquealSoft?.();
+  }
+  app.wasBraking = !!race.braking;
+}
+
+/** Lap table on the goal screen (circuit only). */
+function paintLaps(result) {
+  const box = $('#laps');
+  const replayBtn = $('#btn-replay');
+  const circuit = app.mode === 'circuit';
+  if (replayBtn) {
+    const rec = app.race && app.race.replay;
+    replayBtn.hidden = !(circuit && rec && Array.isArray(rec.frames) && rec.frames.length > 30 && gt.replay);
+  }
+  if (!box) return;
+  const laps = (result && result.lapTimes) || [];
+  box.hidden = !circuit || !laps.length;
+  if (box.hidden) return;
+  const best = Math.min(...laps.filter(Number.isFinite));
+  box.innerHTML = laps
+    .map((t, i) => `<div class="lap-row${t === best ? ' best' : ''}"><span>${i + 1}しゅう</span><b>${Number.isFinite(t) ? formatTime(t) : '—'}</b></div>`)
+    .join('');
+}
+
+// ---- replay
+function startReplay() {
+  if (!app.race || !gt.replay || typeof gt.replay.createReplayPlayer !== 'function') return;
+  clearTimeout(app.goalTimer);
+  clearInterval(app.fireworkTimer);
+  app.replay = gt.replay.createReplayPlayer(app.race);
+  if (!app.replay || app.replay.duration <= 0) {
+    app.replay = null;
+    return;
+  }
+  // Remember where everyone finished so the goal screen keeps its state afterwards.
+  app.replaySaved = {
+    p: { x: app.race.player.x, z: app.race.player.z, speed: app.race.player.speed },
+    r: app.race.rivals.map((o) => ({ x: o.x, z: o.z, speed: o.speed })),
+  };
+  app.replay.restart?.();
+  renderer.camMode = app.replay.camera;
+  renderer.replayMode = true;
+  renderer.particles.length = 0;
+  show('replay');
+  sound.playMusic(((circuitDefs()[app.circuit] || {}).music) || 'meadow');
+  sound.crowdAmbience?.(true);
+  sound.engineStart();
+  voice.say(say('replayLine', 'リプレイ！'));
+  app.replayLast = 0;
+}
+function replayFrame(ts) {
+  const rp = app.replay;
+  if (!rp || !app.race) return endReplay();
+  if (app.paused) {
+    app.replayLast = 0;
+    return;
+  }
+  const dt = app.replayLast ? Math.min(0.05, (ts - app.replayLast) / 1000) : 1 / 60;
+  app.replayLast = ts;
+  const race = app.race;
+  const zBefore = race.player.z;
+  const rzBefore = race.rivals.map((o) => o.z);
+  rp.step(dt);
+  rp.apply(race);
+  // Speeds from movement, so speedo, engine and wheels look alive.
+  if (dt > 0) {
+    race.player.speed = Math.max(0, (race.player.z - zBefore) / dt);
+    race.rivals.forEach((o, i) => (o.speed = Math.max(0, (o.z - rzBefore[i]) / dt)));
+  }
+  renderer.camMode = rp.camera;
+  renderer.steer = race.player.steer || 0;
+  renderer.dt = dt;
+  renderer.draw(race, ts / 1000);
+  const max = (race.playerPreset && race.playerPreset.maxSpeed) || (race.preset && race.preset.maxSpeed) || 1;
+  sound.engineSet(Math.min(1.5, race.player.speed / max), {});
+  const bar = $('#replay-progress');
+  if (bar) bar.style.width = `${Math.round((rp.t / Math.max(0.01, rp.duration)) * 100)}%`;
+  if (rp.done) endReplay();
+}
+function endReplay() {
+  const race = app.race;
+  const saved = app.replaySaved;
+  if (race && saved) {
+    Object.assign(race.player, saved.p);
+    race.rivals.forEach((o, i) => saved.r[i] && Object.assign(o, saved.r[i]));
+  }
+  app.replay = null;
+  app.replaySaved = null;
+  renderer.replayMode = false;
+  renderer.camMode = 'chase';
+  sound.engineStop();
+  if (app.screen === 'replay') {
+    if (app.lastResult) showGoal();
+    else go('title');
+  }
+}
+
 // ---------------------------------------------------------------- grand prix
 function paintRacer(cv, id, frame = 1) {
+  if (app.mode === 'circuit') {
+    const car = id === 'player' ? app.car : rivalCar(id);
+    if (car) return paintSportsCar(cv, car.model, 'front34', car.color, car.number);
+  }
   if (id === 'player') paintVehicle(cv, app.vehicle);
   else paintKart(cv, id, frame);
 }
@@ -954,6 +1423,10 @@ const fps = { frames: [], log: false };
 function frame(ts) {
   requestAnimationFrame(frame);
   if (fps.log) fps.frames.push(ts);
+  if (app.screen === 'replay') {
+    replayFrame(ts);
+    return;
+  }
   const racing = ['race', 'goal', 'standings', 'cup'].includes(app.screen);
   if (!racing || !app.race) {
     lastT = 0;
@@ -974,6 +1447,7 @@ function frame(ts) {
   const p = app.race.player;
   sound.engineSet(Math.min(1.5, app.race.speedPct), { boost: p.boost > 0, offroad: !!p.offroad, drift: !!p.drift });
   if (btnBoost) btnBoost.classList.toggle('ready', app.screen === 'race' && !!app.race.boostReady);
+  if (app.mode === 'circuit') circuitAudio(app.race);
   // The nearest rival's engine: louder when close, panned to its side.
   if (typeof sound.rivalEngineSet === 'function') {
     const near = app.screen === 'race' && app.race.state === 'race' ? nearestRival(app.race) : null;
@@ -1078,13 +1552,46 @@ for (const b of $$('[data-say]')) {
 }
 $('#btn-again').addEventListener('click', () => {
   sound.pop();
-  startRace();
+  if (app.mode === 'circuit') startCircuitRace();
+  else startRace();
 });
 $('#btn-other').addEventListener('click', () => {
   sound.pop();
+  const wasCircuit = app.mode === 'circuit';
   leaveRace();
   endGrandPrix();
-  go('vehicle');
+  if (wasCircuit) app.mode = 'circuit';
+  go(wasCircuit ? 'garage' : 'vehicle');
+});
+$('#btn-circuit')?.addEventListener('click', () => {
+  unlockAudio();
+  sound.pop();
+  endGrandPrix();
+  app.mode = 'circuit';
+  go('garage');
+});
+$('#btn-garage-go')?.addEventListener('click', () => {
+  sound.horn?.('car');
+  go('circuit');
+});
+$('#btn-cam')?.addEventListener('click', () => {
+  sound.pop();
+  cycleCamera();
+});
+$('#btn-replay')?.addEventListener('click', () => {
+  sound.pop();
+  startReplay();
+});
+$('#btn-replay-cam')?.addEventListener('click', () => {
+  sound.pop();
+  if (app.replay) {
+    app.replay.nextCamera();
+    renderer.camMode = app.replay.camera;
+  }
+});
+$('#btn-replay-close')?.addEventListener('click', () => {
+  sound.pop();
+  endReplay();
 });
 
 function leaveRace() {
@@ -1096,6 +1603,9 @@ function leaveRace() {
   announcer.reset();
   hideGridIntro();
   btnBoost?.classList.remove('ready', 'fire');
+  sound.crowdAmbience?.(false);
+  app.replay = null;
+  renderer.camMode = 'chase';
   app.race = null;
   pointers.clear();
 }

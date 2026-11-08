@@ -38,7 +38,45 @@
         <button id="btn-gp" class="big-btn gp" type="button" aria-label="グランプリ（4つのコースで しょうぶ）">
           <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M18 10h28v14a14 14 0 0 1-28 0z" fill="#ffd23f" stroke="#fff" stroke-width="4" stroke-linejoin="round"/><path d="M18 14H9v4a9 9 0 0 0 9 9M46 14h9v4a9 9 0 0 1-9 9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/><path d="M32 38v8" stroke="#fff" stroke-width="6" stroke-linecap="round"/><rect x="20" y="46" width="24" height="8" rx="3" fill="#ffd23f" stroke="#fff" stroke-width="3"/><path d="M32 16l2.4 5 5.4.6-4 3.7 1.1 5.4L32 28l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" fill="#fff"/></svg>
         </button>
+        <button id="btn-circuit" class="big-btn circuit" type="button" aria-label="サーキット（3しゅう しょうぶ）">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M14 8v50" stroke="#fff" stroke-width="5" stroke-linecap="round"/><path d="M16 10h34l-6 10 6 10H16z" fill="#fff"/><path d="M16 10h8.5v6.7H16zM33 10h8.5v6.7H33zM24.5 16.7H33v6.6h-8.5zM41.5 16.7H50l-4 6.6h-4.5zM16 23.3h8.5V30H16zM33 23.3h8.5V30H33z" fill="#3d2c3e"/></svg>
+        </button>
       </div>
+    </section>
+
+    <!-- ガレージ（サーキット） -->
+    <section id="scr-garage" class="screen menu garage" aria-label="ガレージ" hidden>
+      <header class="bar">
+        <button class="round-btn back" type="button" data-go="title" aria-label="もどる">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M38 14 L20 32 L38 50" fill="none" stroke="#3d2c3e" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="round-btn speak" type="button" data-say="どの くるまに する？" aria-label="もういちど きく">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 26h10l12-10v32L22 38H12z" fill="#ffd23f" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/><path d="M42 24c4 4 4 12 0 16M48 18c8 8 8 20 0 28" fill="none" stroke="#3d2c3e" stroke-width="4" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="garage-stage">
+        <canvas id="garage-car" width="640" height="400" aria-hidden="true"></canvas>
+        <div class="turntable" aria-hidden="true"></div>
+      </div>
+      <div class="garage-models" role="list" aria-label="くるま"></div>
+      <div class="garage-colors" role="list" aria-label="いろ"></div>
+      <div class="garage-stats" aria-hidden="true"></div>
+      <button id="btn-garage-go" class="big-btn play" type="button" aria-label="これに きめた">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M22 14 L50 32 L22 50 Z" fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round"/></svg>
+      </button>
+    </section>
+
+    <!-- サーキット えらび -->
+    <section id="scr-circuit" class="screen menu" aria-label="サーキットをえらぶ" hidden>
+      <header class="bar">
+        <button class="round-btn back" type="button" data-go="garage" aria-label="もどる">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M38 14 L20 32 L38 50" fill="none" stroke="#3d2c3e" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="round-btn speak" type="button" data-say="どの サーキットを はしる？" aria-label="もういちど きく">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 26h10l12-10v32L22 38H12z" fill="#ffd23f" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/><path d="M42 24c4 4 4 12 0 16M48 18c8 8 8 20 0 28" fill="none" stroke="#3d2c3e" stroke-width="4" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="grid circuits" role="list"></div>
     </section>
 
     <!-- のりもの えらび -->
@@ -80,6 +118,9 @@
       <button id="btn-boost" class="round-btn boost" type="button" aria-label="ブースト（ほしが5こ たまったら おせる）">
         <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M36 6 L14 36 h16 l-4 22 L50 26 H34 z" fill="#fff" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/></svg>
       </button>
+      <button id="btn-cam" class="round-btn cam" type="button" aria-label="カメラを かえる" hidden>
+        <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="18" width="38" height="28" rx="6" fill="#fff" stroke="#3d2c3e" stroke-width="4"/><path d="M46 28l12-7v22l-12-7z" fill="#fff" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/><circle cx="20" cy="32" r="5" fill="#ff5a5a"/></svg>
+      </button>
       <div id="grid-intro" class="grid-intro" aria-label="スタートグリッド" hidden></div>
     </section>
 
@@ -94,6 +135,7 @@
         <div id="podium" class="podium" aria-label="ひょうしょうだい"></div>
         <div id="your-place" class="your-place" hidden><canvas width="120" height="120" aria-hidden="true"></canvas><b></b></div>
         <div id="results" class="results" aria-label="リザルト"></div>
+        <div id="laps" class="laps" aria-label="ラップタイム" hidden></div>
         <div class="earned" aria-label="もらったシール"></div>
         <p id="race-record" class="race-record"></p>
         <div class="goal-buttons">
@@ -102,6 +144,9 @@
           </button>
           <button id="btn-other" class="big-btn other" type="button" aria-label="ほかの のりもの">
             <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="16" y="18" width="32" height="18" rx="7" fill="#fff"/><rect x="8" y="30" width="48" height="16" rx="7" fill="#fff"/><circle cx="20" cy="48" r="6" fill="#3d2c3e" stroke="#fff" stroke-width="3"/><circle cx="44" cy="48" r="6" fill="#3d2c3e" stroke="#fff" stroke-width="3"/><rect x="21" y="22" width="22" height="9" rx="3" fill="#7ec8ff"/></svg>
+          </button>
+          <button id="btn-replay" class="big-btn replay" type="button" aria-label="リプレイを みる" hidden>
+            <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="14" width="48" height="36" rx="7" fill="#fff"/><path d="M27 23l14 9-14 9z" fill="#e8344a"/></svg>
           </button>
           <button id="btn-next" class="big-btn next" type="button" aria-label="つぎへ" hidden>
             <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M14 32h30M30 16l16 16-16 16" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -139,6 +184,18 @@
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- リプレイ -->
+    <section id="scr-replay" class="screen race replay" aria-label="リプレイ" hidden>
+      <div class="replay-badge" aria-hidden="true"><i></i>REPLAY</div>
+      <div class="replay-bar" aria-hidden="true"><b id="replay-progress"></b></div>
+      <button id="btn-replay-cam" class="round-btn cam" type="button" aria-label="カメラを かえる">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="8" y="18" width="38" height="28" rx="6" fill="#fff" stroke="#3d2c3e" stroke-width="4"/><path d="M46 28l12-7v22l-12-7z" fill="#fff" stroke="#3d2c3e" stroke-width="4" stroke-linejoin="round"/><circle cx="20" cy="32" r="5" fill="#ff5a5a"/></svg>
+      </button>
+      <button id="btn-replay-close" class="round-btn close-x" type="button" aria-label="リプレイを おわる">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M18 18l28 28M46 18L18 46" stroke="#3d2c3e" stroke-width="8" stroke-linecap="round"/></svg>
+      </button>
     </section>
 
     <!-- シールブック -->

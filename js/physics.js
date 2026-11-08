@@ -65,8 +65,14 @@ export function stepPlayer(p, input, dt, opt) {
   if (p.boost > 0) target = max * 1.45;
   else if (p.offroad) target = max * 0.62;
   else if (p.slip > 0) target = max * 1.08; // tucked in behind a rival: a little extra pull
+  // Circuit auto-brake: the coming corner sets a ceiling on the pace (the child only steers).
+  p.braking = false;
+  if (opt.cap != null && !opt.finished && target > max * opt.cap) {
+    target = max * opt.cap;
+    p.braking = p.speed > target + 1;
+  }
   if (opt.finished) target = 0;
-  const rate = target > p.speed ? preset.accel : preset.accel * 1.2;
+  const rate = target > p.speed ? preset.accel : preset.accel * (p.braking ? 1.8 : 1.2);
   if (p.speed < target) p.speed = Math.min(target, p.speed + rate * dt);
   else p.speed = Math.max(target, p.speed - rate * dt);
 

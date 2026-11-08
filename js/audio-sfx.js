@@ -205,3 +205,32 @@ export function shutter(sound) {
   sound.noise(t + 0.07, 0.06, { filter: 'bandpass', freq: 2200, q: 2, gain: 0.16 });
   sound.tone(1800, t + 0.07, 0.05, { type: 'square', gain: 0.03 });
 }
+
+/** Gear change: a short lift (dip) then a "ブォン" as the next gear bites. */
+export function gearShift(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.noise(t, 0.05, { filter: 'bandpass', freq: 900, q: 1.5, gain: 0.05 });
+  sound.tone(150, t + 0.05, 0.22, { type: 'sawtooth', slide: 95, slideTime: 0.18, gain: 0.1, lp: 700, attack: 0.02 });
+  sound.tone(300, t + 0.05, 0.16, { type: 'square', slide: 190, slideTime: 0.14, gain: 0.025, lp: 900 });
+}
+
+/** Soft brake squeal at the braking point (never harsh). */
+export function brakeSquealSoft(sound) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.noise(t, 0.35, { filter: 'bandpass', freq: 2600, q: 6, sweep: 2000, gain: 0.05, attack: 0.05 });
+  sound.tone(1900, t, 0.3, { type: 'sine', slide: 1700, gain: 0.018, attack: 0.06, release: 0.15 });
+}
+
+/** Lap-line beep: two quick notes; a best lap gets a bright third note. */
+export function lapBeep(sound, best = false) {
+  if (!sound.ok()) return;
+  const t = now(sound);
+  sound.tone(noteFreq('A5'), t, 0.09, { type: 'square', gain: 0.06, lp: 3000 });
+  sound.tone(noteFreq('E6'), t + 0.11, 0.12, { type: 'square', gain: 0.06, lp: 3000 });
+  if (best) {
+    sound.tone(noteFreq('A6'), t + 0.25, 0.28, { type: 'triangle', gain: 0.09 });
+    sound.tone(noteFreq('E6'), t + 0.25, 0.28, { type: 'triangle', gain: 0.05 });
+  }
+}

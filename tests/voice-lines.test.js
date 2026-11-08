@@ -149,3 +149,14 @@ test('third-wave lines: leader, rocket, jump, ghost, photo finish, night', async
   assert.equal(L.COURSE_NAMES.city, 'よるの まち');
   assert.ok(L.gpNextLine('city').includes('よるの まち'));
 });
+
+test('circuit lines: laps, best lap, garage, replay', async () => {
+  const L = await import('../js/voice-lines.js');
+  assert.equal(L.lapLine(2, 3), '2しゅうめ！');
+  assert.ok(L.lapLine(3, 3).includes('ファイナルラップ'));
+  assert.ok(L.lapLine(NaN, 3).length > 0);
+  assert.ok(L.bestLapLine().includes('ベストラップ'));
+  assert.notEqual(L.garageLine('gt'), L.garageLine('proto'));
+  assert.ok(L.garageLine('nope').length > 0);
+  for (const f of [L.circuitLine, L.replayLine]) assert.ok(f().length > 0);
+});
