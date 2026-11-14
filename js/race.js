@@ -11,7 +11,7 @@ import { vehiclePreset } from './vehicle-stats.js';
 export const COUNTDOWN = 3;
 /** Stars needed to charge the boost button, and how long a charged boost waits before firing itself. */
 export const BOOST_STARS = 5;
-export const BOOST_AUTO_SECS = 6;
+export const BOOST_AUTO_SECS = 10;
 export const BOOST_SECS = 2.4;
 /** A rival must get this far past the player (or fall this far behind) before the rank changes. */
 export const RANK_MARGIN = 60;

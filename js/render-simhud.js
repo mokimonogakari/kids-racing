@@ -391,14 +391,25 @@ export function lapPath(course) {
   const segs = course.segments || [];
   const n = Math.max(2, Math.min(segs.length, num(course.lapLength, segs.length)));
   const raw = [];
-  let x = 0;
-  let y = 0;
-  let h = 0;
-  for (let i = 0; i < n; i++) {
-    h += num(segs[i] && segs[i].curve, 0) * 0.02;
-    x += Math.sin(h);
-    y -= Math.cos(h);
-    raw.push(x, y);
+  const track = course.track;
+  if (track && track.samples && track.samples.length > 2 && typeof course.toTrack === 'function') {
+    // Real closed loop from the 3D track geometry (so the map is a closed circuit).
+    const ns = track.samples.length;
+    for (let i = 0; i < n; i++) {
+      const s = course.toTrack(i * 200, 0).s;
+      const p = track.samples[Math.round(s) % ns].pos;
+      raw.push(p[0], p[2]);
+    }
+  } else {
+    let x = 0;
+    let y = 0;
+    let h = 0;
+    for (let i = 0; i < n; i++) {
+      h += num(segs[i] && segs[i].curve, 0) * 0.02;
+      x += Math.sin(h);
+      y -= Math.cos(h);
+      raw.push(x, y);
+    }
   }
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (let i = 0; i < raw.length; i += 2) {
@@ -452,6 +463,7 @@ function drawLapMap(r, race) {
       const [px, py] = P(p);
       if (i) c.lineTo(px, py); else c.moveTo(px, py);
     });
+    if (race.course && race.course.track) c.closePath();
     c.stroke();
   }
   // start/finish

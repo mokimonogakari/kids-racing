@@ -152,3 +152,18 @@ test('circuit tuning only applies on circuits and keeps easy < normal < hard pac
   };
   assert.ok(pace('easy') < pace('normal') && pace('normal') < pace('hard'));
 });
+
+test('circuit rivals drive their own pace (no rubber-band to the player) and finish spread out', async () => {
+  const { AI_LEVELS, AI_LEVEL_IDS, effectiveLevel } = await import('../js/ai.js');
+  for (const id of AI_LEVEL_IDS) assert.equal(effectiveLevel({ level: AI_LEVELS[id], brake: [1] }).ownPace, true);
+  const race = new Race({ circuit: 'coast', vehicle: 'car', speed: 'slow', rivals: 'normal', laps: 1, seed: 7919 });
+  let t = 0;
+  while (race.rivals.some((r) => !r.finished) && t < 400) {
+    race.update(1 / 30, { steer: Math.abs(race.player.x) < 0.08 ? 0 : -Math.sign(race.player.x) });
+    t += 1 / 30;
+  }
+  const times = race.rivals.map((r) => r.finishTime).sort((a, b) => a - b);
+  const gaps = times.slice(1).map((v, i) => v - times[i]);
+  assert.ok(gaps.filter((g) => g < 0.1).length <= 1, `rivals should not finish in a bunch: ${gaps.map((g) => g.toFixed(2))}`);
+  assert.ok(times[times.length - 1] - times[0] > 0.5, 'field spread over at least half a second');
+});

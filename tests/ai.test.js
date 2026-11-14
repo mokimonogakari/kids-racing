@@ -100,7 +100,9 @@ test('difficulty levels: easy < normal < hard in rival skill', () => {
   const mid = (lv) => (lv.skill[0] + lv.skill[1]) / 2;
   assert.ok(mid(AI_LEVELS.easy) < mid(AI_LEVELS.normal));
   assert.ok(mid(AI_LEVELS.normal) < mid(AI_LEVELS.hard));
-  assert.ok(AI_LEVELS.easy.band >= AI_LEVELS.hard.band, 'easier levels keep the pack closer');
+  assert.ok(AI_LEVELS.easy.hold <= AI_LEVELS.hard.hold || AI_LEVELS.easy.floor >= AI_LEVELS.hard.floor, 'leaders are reeled in');
+  assert.ok(AI_LEVELS.hard.skill[0] > 1, 'hard rivals can out-run the player on pace alone');
+  assert.ok(AI_LEVELS.easy.skill[1] < 1, 'easy rivals cannot');
   for (const id of AI_LEVEL_IDS) {
     const r = makeRival('cat', { z: 800, x: 0.5 }, AI_LEVELS[id], makeRng(9));
     assert.ok(r.skill >= AI_LEVELS[id].skill[0] && r.skill <= AI_LEVELS[id].skill[1]);

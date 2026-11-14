@@ -1122,12 +1122,20 @@ function circuitOutline(id) {
     let y = 0;
     let hd = 0;
     const pts = [];
+    const tr = course.track;
     for (let i = 0; i < n; i++) {
+      if (tr && tr.samples && typeof course.toTrack === 'function') {
+        // Real closed loop from the 3D track.
+        const p = tr.samples[Math.round(course.toTrack(i * 200, 0).s) % tr.samples.length].pos;
+        pts.push([p[0], p[2]]);
+        continue;
+      }
       hd += (course.segments[i].curve || 0) * 0.02;
       x += Math.sin(hd);
       y -= Math.cos(hd);
       pts.push([x, y]);
     }
+    if (tr && pts.length) pts.push(pts[0]);
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
     const minX = Math.min(...xs);

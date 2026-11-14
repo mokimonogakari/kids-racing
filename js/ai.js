@@ -18,6 +18,13 @@ export const ANIMAL_TRAITS = {
 export const ROCKET_SECS = 4;
 
 /**
+ * Small per-animal pace offsets so the pack spreads out into a queue instead of moving as one
+ * clump (otherwise a child is either ahead of everyone or behind everyone).
+ * Scaled by level.pack (0 = off; used by the kids' levels).
+ */
+export const PACK_SPREAD = { cat: 0.06, rabbit: 0.03, pig: 0, frog: -0.03, bear: -0.06 };
+
+/**
  * Competition levels (parent setting "きょうそう").
  * skill: fraction of the player's top speed a rival can reach on its own.
  * band:  catch-up strength – a rival that has fallen behind may run this much faster than
@@ -31,11 +38,12 @@ export const ROCKET_SECS = 4;
  * late:  multiplier for both effects in the final stretch, so the ending is "earned".
  * pads:  whether rivals also use the rainbow boost pads.
  * react: reaction time at the start (seconds).
+ * pack:  strength of the per-animal PACK_SPREAD offsets (spreads the pack into a queue).
  */
 export const AI_LEVELS = {
-  easy: { skill: [0.70, 0.82], band: 0.2, dist: 2200, hover: 600, lead: 0.02, hold: 0.16, floor: 0.66, late: 0.4, pads: false, react: [0.25, 0.7] },
-  normal: { skill: [0.82, 0.92], band: 0.14, dist: 2200, hover: 520, lead: 0.04, hold: 0.13, floor: 0.74, late: 0.5, pads: true, react: [0.15, 0.5] },
-  hard: { skill: [0.96, 1.06], band: 0.1, dist: 2600, hover: 520, lead: 0.07, hold: 0.07, floor: 0.86, late: 0.6, pads: true, react: [0.05, 0.35] },
+  easy: { skill: [0.70, 0.82], band: 0.2, dist: 2200, hover: 600, lead: 0.02, hold: 0.16, floor: 0.66, late: 0.4, pads: false, react: [0.25, 0.7], pack: 1 },
+  normal: { skill: [0.84, 0.95], band: 0.14, dist: 1800, hover: 520, lead: 0.04, hold: 0.22, floor: 0.64, late: 0.5, pads: true, react: [0.15, 0.5], pack: 1 },
+  hard: { skill: [1.11, 1.19], band: 0.45, dist: 1800, hover: 150, lead: 0.06, hold: 0.3, floor: 0.5, late: 0.6, pads: true, react: [0.05, 0.35] },
 };
 export const AI_LEVEL_IDS = Object.keys(AI_LEVELS);
 
@@ -45,14 +53,21 @@ export const AI_LEVEL_IDS = Object.keys(AI_LEVELS);
  * Only used when the race passes ctx.brake (circuit); the normal course values above are untouched.
  */
 export const CIRCUIT_TUNE = {
-  easy: { skillMul: 0.79, band: 0.22, hold: 0.3, floor: 0.52, lead: 0.0, hover: 650 },
-  normal: { skillMul: 0.745, band: 0.2, hold: 0.3, floor: 0.52, lead: 0.0, hover: 650 },
-  hard: { skillMul: 0.736, band: 0.16, hold: 0.25, floor: 0.55, lead: 0.03, hover: 560 },
+  easy: { ownPace: true, skillMul: 0.91, band: 0.08, hold: 0.06, dist: 4000 },
+  normal: { ownPace: true, skillMul: 0.835, band: 0.08, hold: 0.06, dist: 4000 },
+  hard: { ownPace: true, skillMul: 0.9, band: 0.06, hold: 0.04, dist: 4000 },
 };
-const CIRCUIT_LEVELS = new Map(AI_LEVEL_IDS.map((k) => [AI_LEVELS[k], { ...AI_LEVELS[k], ...CIRCUIT_TUNE[k] }]));
 /** Level parameters in effect for this ctx (circuit overrides when ctx.brake is present). */
 export function effectiveLevel(ctx) {
-  return (ctx.brake && CIRCUIT_LEVELS.get(ctx.level)) || ctx.level;
+  if (!ctx.brake) return ctx.level;
+  const id = AI_LEVEL_IDS.find((k) => AI_LEVELS[k] === ctx.level);
+  const tune = id && CIRCUIT_TUNE[id];
+  if (!tune) return ctx.level;
+  if (tune._base !== ctx.level || !tune._merged) {
+    tune._base = ctx.level;
+    tune._merged = { ...ctx.level, ...tune };
+  }
+  return tune._merged;
 }
 
 export const LANES = [-0.62, -0.21, 0.21, 0.62];
@@ -244,15 +259,23 @@ export function stepRival(r, ctx, dt) {
   const bend = Math.abs(seg.curve || 0) > 1.5;
   const skillT = max * r.skill * (level.skillMul || 1) * (bend ? tr.corner || 1 : tr.top || 1);
   const steadyK = tr.steady ? 0.5 : 1;
+  const pack = (PACK_SPREAD[r.animal] || 0) * (level.pack || 0);
   let target;
-  if (gap > 0) {
+  if (level.ownPace) {
+    // Circuit (本格): rivals drive their own pace; a mild band only nudges it (+band behind, -hold ahead).
+    const g = clamp(Math.abs(gap) / level.dist, 0, 1) * lateK * steadyK;
+    target = gap > 0 ? skillT * (1 + level.band * g) : skillT * (1 - level.hold * g);
+  } else if (gap > 0) {
     // Behind: close in when far back, then trail at about `hover` without passing on pace alone.
-    const g = clamp((gap - level.hover) / level.dist, 0, 1) * lateK * steadyK;
+    const hover = level.hover * (1 - pack * 6);
+    const g = clamp((gap - hover) / level.dist, 0, 1) * lateK * steadyK;
     target = Math.max(skillT, ref * (1 + level.band * g));
   } else {
     // Ahead: may pull away a little when close, is reeled in when far ahead, never crawls.
     const g = clamp(-gap / level.dist, 0, 1) * lateK * steadyK;
-    const cap = ref * (1 + level.lead - (level.lead + level.hold) * g);
+    // spread (circuit): each rival settles at its own distance ahead, so finishers don't bunch.
+    const own = level.spread ? 1 + (r.skill - 0.9) * level.spread : 1;
+    const cap = ref * own * (1 + pack + level.lead - (level.lead + level.hold) * g);
     target = Math.min(skillT, Math.max(skillT * level.floor, cap));
   }
   target *= slow;
